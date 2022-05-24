@@ -7,6 +7,7 @@ from typing import TypeVar, Dict,List, Any, Union, Tuple, Optional
 from plotly import graph_objs as go
 import pandas as pd
 from itertools import combinations
+from plotly.subplots import make_subplots
 IntFloat = TypeVar("IntFloat", int, float)
 
 class Parameters():
@@ -409,8 +410,11 @@ class Model_Baseline(Parameters):
         """
         if not isinstance(list_of_functions, list): list_of_functions = [list_of_functions]
         df = pd.DataFrame(columns=["Objective Name","Cost Objective", "Land Usage Objective", "Health Impact Objective"])
+        _figs = []
+        minimization_names = []
         for minimize_function in list_of_functions:
             minimize_function()
+            minimization_names.append(self.minimization)
             self.model.print_information()
             self.solved_model = self.model.solve()
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
@@ -420,11 +424,11 @@ class Model_Baseline(Parameters):
             self.model.remove_objective()
             self.solved_graph = nx.DiGraph()
             df_solved_model = self.solved_model.as_df()
-            self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values]
+            self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values if round(value) > 0]
             self._data_locations = [key for key, _ in self.df_solved_model_list]
             # Get the distance for all cities between all cities as our cost edges.
             for i in range(len(self._data_locations)):
-                if 'x' in self._data_locations[i]:
+                if 'f' in self._data_locations[i]:
                     first_node = eval(self._data_locations[i][1])
                     second_node = eval(self._data_locations[i][2])
                     # Eucledian distance calculation.
@@ -432,7 +436,25 @@ class Model_Baseline(Parameters):
                     # Add the edge to a graph with the distance as an edge weight.
                     self.solved_graph.add_edge(first_node, second_node, weight=distance)
             df = self.create_dataframe(df)
-            if self._plot_graph: self.plot_graph()
+            if self._plot_graph: _figs.append(self.plot_graph())
+        if self._plot_graph:
+            if len(list_of_functions) == 1:
+                _figs[0].show()
+                return df
+            _num_rows = round(len(list_of_functions)/2)
+            _num_cols = (len(list_of_functions)//2) + 1
+            _total_fig = make_subplots(rows = _num_rows, cols = _num_cols, shared_xaxes= False,start_cell="top-left", subplot_titles=minimization_names,vertical_spacing=0.1, horizontal_spacing=0.1)
+            col_num = 1
+            row_num = 1
+            for idx, fig in enumerate(_figs):
+                if col_num > 2:
+                    row_num = 2
+                    col_num = 1
+                for item in fig['data']:
+                    if idx > 0: item['showlegend'] = False
+                    _total_fig.add_trace(item, row = row_num, col = col_num)
+                col_num +=1
+            _total_fig.show()
         return df
     
     def _calculate_cost(self, y_decisions : List[Tuple[Any, int]], x_decisions : Dict[tuple, Any]) -> Tuple[float, float]:
@@ -556,8 +578,8 @@ class Model_Baseline(Parameters):
                         showlegend=True,
                         hovermode='closest',
                         margin=dict(b=20,l=5,r=5,t=40),
-                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=True),
-                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=True))
+                        xaxis=dict(showgrid=True, zeroline=False, showticklabels=True),
+                        yaxis=dict(showgrid=True, zeroline=False, showticklabels=True))
                         )
         for i in range(CATEGORIES):
             x_edges, y_edges, colors, widths, name = _edge_colours(self.solved_graph,VALUES[i], VALUES[i+1])
@@ -612,7 +634,8 @@ class Model_Baseline(Parameters):
                         color=current_node_colour[1],
                         size=20,
                         line_width=2)))
-        fig.show()
+        return fig
+
 class Multiobjective_model(Model_Baseline):
     """
     Class Multiobjective_model. Inherits Model_Baseline.
@@ -627,6 +650,7 @@ class Multiobjective_model(Model_Baseline):
         :seed: The seed for random number generation.
         """
         super().__init__(Graph, seed)
+        assert len(df) > 1, f"Must be atleast two functions being compared for a multiobjective optimization. Got {len(df)}"
         self.org_df : pd.DataFrame = df.copy()
         self.df : pd.DataFrame = df.copy()
         self.df.set_index('Objective Name', inplace=True)
@@ -636,8 +660,8 @@ class Multiobjective_model(Model_Baseline):
                             "Land Usage Objective" : [1, self.minimize_land_usage],
                             "Health Impact Objective" : [2, self.minimize_health_impact]}
         self.deviations = self._create_deviations()
-        self._z = self.model.continuous_var(name="z")
-        self.model.minimize(self._z)
+        self._z = self.model.continuous_var(name="z") 
+
     def _create_deviations(self) -> List[docplex.mp.linear.LinearExpr]:
         """
         Private helper function.
@@ -663,8 +687,10 @@ class Multiobjective_model(Model_Baseline):
         Removes the constraints created in _create_multi_constraints() such that there is no overlap in constraints.
         :param combination: A combination created by itertools.combinations
         """
+        self.model.remove_objective()
         for comb in combination:
             self.model.remove_constraint(f"constraint_{comb}")
+
     def solve_multi_objective(self, plot_graph : Optional[bool] = False, verbose : Optional[bool] = False) -> pd.DataFrame:
         """
         Public function.
@@ -685,9 +711,12 @@ class Multiobjective_model(Model_Baseline):
             for key, value in dict.items():
                 if val in value:
                     return key
+        _figures = []
+        plot_names = []
         all_double_combinations = list(combinations([i for i in range(0,len(self._optimal_values))], 2))
         if len(self._optimal_values) == 3: all_double_combinations.append((0,1,2))
-        for combination in all_double_combinations:    
+        for combination in all_double_combinations:  
+            self.model.minimize(self._z)
             self._create_multi_constraints(combination)
             self.model.print_information()
             self.solved_model = self.model.solve()
@@ -698,11 +727,11 @@ class Multiobjective_model(Model_Baseline):
             self._remove_multi_constraints(combination)
             self.solved_graph = nx.DiGraph()
             df_solved_model = self.solved_model.as_df()
-            self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values]
+            self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values if round(value) > 0]
             self._data_locations = [key for key, _ in self.df_solved_model_list]
             # Get the distance for all cities between all cities as our cost edges.
             for i in range(len(self._data_locations)):
-                if 'x' in self._data_locations[i]:
+                if 'f' in self._data_locations[i]:
                     first_node = eval(self._data_locations[i][1])
                     second_node = eval(self._data_locations[i][2])
                     # Eucledian distance calculation.
@@ -714,15 +743,33 @@ class Multiobjective_model(Model_Baseline):
                 if idx < len(combination)-1 : _name += f"{_get_key(self.column_dict, comb)}, "
                 else: _name += f"and {_get_key(self.column_dict, comb)}"
             self.org_df = self.create_dataframe(self.org_df, name = _name)
-            if plot_graph: self.plot_graph(f"Solution for {_name}")
+            plot_names.append(_name)
+            if plot_graph: _figures.append(self.plot_graph(f"Solution for {_name}"))
         self.org_df.set_index('Objective Name', inplace=True)
+        if plot_graph:
+            _num_of_cols_rows = len(all_double_combinations)//2
+            if _num_of_cols_rows == 0: 
+                _figures[0].show()
+                return self.org_df
+            _total_fig = make_subplots(rows = _num_of_cols_rows, cols = _num_of_cols_rows, shared_xaxes= False, start_cell="top-left", subplot_titles=plot_names, vertical_spacing=0.1, horizontal_spacing=0.1)
+            col_num = 1
+            row_num = 1
+            for idx, fig in enumerate(_figures):
+                if col_num > _num_of_cols_rows: 
+                    col_num = 1
+                    row_num = 2
+                for item in fig['data']:
+                    if idx > 0: item['showlegend'] = False
+                    _total_fig.add_trace(item, row = row_num, col = col_num)
+                col_num += 1
+            _total_fig.show()
         return self.org_df
 if __name__ == '__main__':
     set_seed = 0
     RandomGraph = Graph(8,baseline=True,plot_graph=False, seed=set_seed)
     model_baseline = Model_Baseline(RandomGraph, plot_graph=False, seed=set_seed, verbose=False)
-    list_of_functions = [model_baseline.minimize_cost, model_baseline.minimize_land_usage, model_baseline.minimize_health_impact]
+    list_of_functions = [model_baseline.minimize_cost, model_baseline.minimize_health_impact]
     data = model_baseline.solve_model(list_of_functions)
-    mo = Multiobjective_model(RandomGraph, df = data) 
+    mo = Multiobjective_model(RandomGraph, df = data, seed=set_seed) 
     df = mo.solve_multi_objective()
     print(df)
