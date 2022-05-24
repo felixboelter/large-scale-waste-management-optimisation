@@ -14,7 +14,13 @@ class Graph():
     """
     Class Graph. This class creates a randomised networkx graph.
     """
-    def __init__(self, number_of_cities: int, number_list: List[int] = [0,0,0], baseline: bool = False, plot_graph : bool = False, seed : IntFloat = 1) -> None:
+    def __init__(self, 
+                number_of_cities: int, 
+                number_list: List[int] = [0,0,0], 
+                baseline: bool = False, 
+                plot_graph : bool = False, 
+                seed : IntFloat = 1,
+                baseline_scaler : int = 3) -> None:
         """
         Graph constructor Public access to G (Networkx graph), special_locations
         (dict), supplies (dict), demands (dict), custom_parameters (dict),
@@ -30,7 +36,9 @@ class Graph():
         """
         super().__init__()
         assert all(x <= number_of_cities and x >= 0 for x in number_list), (f"All numbers in the number list must be less than or equal to the number of cities: {number_of_cities} and greater than or equal to zero. Got {number_list}.")
+        assert baseline_scaler > 0, f"Baseline scaler must be strictly positive and greater than 0. Got {baseline_scaler}"
         self._baseline = baseline
+        self._scaler = baseline_scaler
         self._number_of_cities = number_of_cities
         self._number_list = number_list
         self._value_strings = ['D', 'I', 'R']
@@ -347,7 +355,7 @@ class Graph():
         # Create random points in range 0 - 100.
         pts = 100*np.random.random((self._number_of_cities*20,2))
         # Apply K-means to the random points.
-        if self._baseline: scaler = 3
+        if self._baseline: scaler = self._scaler
         else: scaler = 1
         kmean = KMeans(n_clusters=self._number_of_cities*scaler).fit(pts)
         # The centroids are the nodes of the cities, as such they are spaced out.
