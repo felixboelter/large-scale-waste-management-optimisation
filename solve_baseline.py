@@ -8,6 +8,7 @@ from plotly import graph_objs as go
 import pandas as pd
 from itertools import combinations
 from plotly.subplots import make_subplots
+import ast
 IntFloat = TypeVar("IntFloat", int, float)
 
 class Parameters():
@@ -429,8 +430,8 @@ class Model_Baseline(Parameters):
             # Get the distance for all cities between all cities as our cost edges.
             for i in range(len(self._data_locations)):
                 if 'f' in self._data_locations[i]:
-                    first_node = eval(self._data_locations[i][1])
-                    second_node = eval(self._data_locations[i][2])
+                    first_node = ast.literal_eval(self._data_locations[i][1])
+                    second_node = ast.literal_eval(self._data_locations[i][2])
                     # Eucledian distance calculation.
                     distance = np.round(((first_node[0] - second_node[0])**2 + (first_node[1] - second_node[1])**2)**0.5)
                     # Add the edge to a graph with the distance as an edge weight.
@@ -501,8 +502,8 @@ class Model_Baseline(Parameters):
         self._ij_data = [(i,j,w['weight']) for i, j, w in self.solved_graph.edges(data=True) if i in self._G.collection_locations and j in self._sorting_facilities]
         self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if j in self._sorting_facilities and k in self._incinerator_facilities]
         self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if j in self._sorting_facilities and kp in self._landfill_facilities]
-        _y_decisions = [(eval(key[1]), int(key[2])) for key, _ in self.df_solved_model_list if 'y' in key]
-        _x_decisions = {(eval(key[1]), eval(key[2])): value for key, value in self.df_solved_model_list if 'x' in key}
+        _y_decisions = [(ast.literal_eval(key[1]), int(key[2])) for key, _ in self.df_solved_model_list if 'y' in key]
+        _x_decisions = {(ast.literal_eval(key[1]), ast.literal_eval(key[2])): value for key, value in self.df_solved_model_list if 'x' in key}
         _cost_objective : Tuple[float, float] = self._calculate_cost(_y_decisions, _x_decisions)
         _land_objective : float = self._calculate_land_usage(_y_decisions)
         _health_objective : Tuple[float, float] = self._calculate_health_impact(_y_decisions, _x_decisions)
@@ -595,7 +596,7 @@ class Model_Baseline(Parameters):
                 mode='lines'))
         _node_colours = dict()
         _custom_node_attrs = dict()
-        _data_locations_y = {eval(key[1]):key[2] for key in self._data_locations if 'y' in key}
+        _data_locations_y = {ast.literal_eval(key[1]):key[2] for key in self._data_locations if 'y' in key}
         dictionary_values = {0 : "Small", 1: "Medium", 2 : "Large"}
         for node in self.solved_graph.nodes():
             if node in self._G.collection_locations: 
@@ -732,8 +733,8 @@ class Multiobjective_model(Model_Baseline):
             # Get the distance for all cities between all cities as our cost edges.
             for i in range(len(self._data_locations)):
                 if 'f' in self._data_locations[i]:
-                    first_node = eval(self._data_locations[i][1])
-                    second_node = eval(self._data_locations[i][2])
+                    first_node = ast.literal_eval(self._data_locations[i][1])
+                    second_node = ast.literal_eval(self._data_locations[i][2])
                     # Eucledian distance calculation.
                     distance = np.round(((first_node[0] - second_node[0])**2 + (first_node[1] - second_node[1])**2)**0.5)
                     # Add the edge to a graph with the distance as an edge weight.
