@@ -9,169 +9,36 @@ import pandas as pd
 from itertools import combinations
 from plotly.subplots import make_subplots
 import ast
-IntFloat = TypeVar("IntFloat", int, float)
+import time
+from parameters import Parameters
 
-class Parameters():
-    """
-    Class Parameters. Creates a all the parameters used in the baseline.
-    Parameter amounts based on: Olapiriyakul, Sun & Pannakkong, Warut &
-    Kachapanya, Warith & Starita, Stefano. (2019). Multiobjective Optimization
-    Model for Sustainable Waste Management Network Design. Journal of Advanced
-    Transportation. 2019. 1-15. 10.1155/2019/3612809. 
-    """
-    def __init__(self, G: Graph, seed : IntFloat = 0) -> None:
-        """
-        Parameters Constructor. 
-        Public access to parameters:
-        facility_storage_capacities : np.ndarray, maximum_amount_transport : np.ndarray, 
-        operational_costs : np.ndarray, land_stress_ratios : np.ndarray, 
-        opening_costs : np.ndarray, link_populations : Dict[tuple, int],
-        population_near_facilities : Dict[tuple, np.float64], link_dalys : Dict[tuple, float],
-        facility_daly_per_person : Dict[tuple, List[float]]
+FND = TypeVar("FND", float, np.ndarray)
 
-        :param G: Graph object from generate_graph.py
-        :param seed: The seed to generate random numbers from.
-        """
-        np.random.seed(seed)
-        self._G = G
-        self._sorting_facilities = [k for k, v in self._G.special_locations.items() if 'J' in v]
-        self._incinerator_facilities = [k for k, v in self._G.special_locations.items() if 'K' in v]
-        self._landfill_facilities = [k for k, v in self._G.special_locations.items() if "K'" in v]
-        self._direct_land_usage =  np.array([4800,8000,16000, 8000,16000, 24000, 80000,160000,192000]).reshape(3,3)
-        self._indirect_land_usage =  np.array([6191,10780,21559, 11971,23941,35911, 127770,255525,335295]).reshape(3,3)
-        self._range_of_facility_sizes = range(0, self._direct_land_usage.shape[1])
-        self.facility_storage_capacities : np.ndarray= self._G.add_custom_parameter(name= 'facility_storage', size=(3,3), fixed_number=[50,100,300,50,100,150,50,100,150])
-        self.maximum_amount_transport : np.ndarray= self._G.add_custom_parameter(name = 'maximum_amount_transport', size = 2, fixed_number=[16,32])
-        _random_increasing = [np.random.randint(low=l,high=h) for l,h in [(100000,200000),(200000,400000),(100000,200000)]]
-        self.operational_costs : np.ndarray = self._G.add_custom_parameter(name='operational_costs',size=(3),fixed_number=_random_increasing)
-        self.land_stress_ratios : np.ndarray = self._create_land_usage_stress_ratios()
-        self.opening_costs : np.ndarray = self._create_opening_costs()
-        self.link_populations : Dict[tuple, int] = self._create_population_near_links()
-        self.population_near_facilities : Dict[tuple, np.float64] = self._create_population_near_facilities()
-        self.link_dalys : Dict[tuple, float] = self._create_DALY_for_links()
-        self.facility_daly_per_person : Dict[tuple, List[float]] = self._create_DALY_for_facilities()
-
-    def _create_DALY_for_facilities(self) -> Dict[tuple, List[float]]:
-        """
-        Helper function.
-        Creates DALY per person values for all facilities of length l.
-        :return: DALYs per person for all facilities of length l.
-        """
-        facility_daly = np.array([[0.07, 0.14, 0.28],
-                                [5.95, 11.9, 17.85],
-                                [3.89, 7.78, 11.66]])
-        daly_per_person = dict()
-        for ix, facilities in enumerate([self._sorting_facilities, self._incinerator_facilities, self._landfill_facilities]): 
-            for node in facilities:
-                daly_per_person.update({node: [facility_daly[ix][l] for l in self._range_of_facility_sizes]})
-        self._G.custom_parameters['facility_daly_per_person'] = daly_per_person
-        return daly_per_person
-
-    def _create_DALY_for_links(self) -> Dict[tuple, float]:
-        """
-        Helper function.
-        Creates DALY per person values for all links (i,j), (j,k), and (j,k').
-        :return: DALYs per person for all links (i,j), (j,k), and (j,k').
-        """
-        DALY_per_vehicle = {16 : [5.82e-07, 5.62e-08],
-                            32:  [1.16e-06, 1.12e-07]}
-        link_DALY = dict()
-        for i,j,w in self._G.G.edges(data=True):
-            weight = w['weight']
-            if i == j: link_DALY[(i,j)] = (DALY_per_vehicle[16][0], DALY_per_vehicle[32][0])
-            else: link_DALY[(i,j)] = (DALY_per_vehicle[16][1] * weight, DALY_per_vehicle[32][1] * weight)
-        self._G.custom_parameters['daly_per_person_links'] = link_DALY
-        return link_DALY
-
-    def _create_land_usage_stress_ratios(self) -> np.ndarray:
-        """
-        Helper function.
-        Creates the land usage stress ratios according to the formula given in Olapiriyakul, Sun & Pannakkong, Warut & Kachapanya, Warith & Starita, Stefano. (2019). P.7
-        :return: Land stress ratios of all facilities of size l.
-        """
-        land_stress_ratios = (self._direct_land_usage+self._indirect_land_usage)/100**2
-        self._G.custom_parameters['land_stress_ratios'] = land_stress_ratios
-        return land_stress_ratios
-    
-    def _create_opening_costs(self) -> np.ndarray:
-        """
-        Helper function. Creates opening costs for all facilities of size l.
-        Data for costs gathered from Azienda cantonale dei rifiuti Giubiasco
-        (2010), Elrabaya, Daker & Marchenko, Valentina. (2021) 
-        :return: Opening costs for all facilities of size l.
-        """
-        # Elrabaya, Daker & Marchenko, Valentina. (2021). Landfill development cost of 6'482'949 in 2019. Inflation adjusted through (https://www.bls.gov/data/inflation_calculator.htm : 7'241'085.63)
-        _SHARJAH_LANDFILL_M_SQRD = 126500
-        _LANDFILL_DEVELOPMENT_COST_DOLLAR= 7241085.63
-        # Exchange according to (https://www.bloomberg.com/quote/USDCHF:CUR : 0.9952 May 2022)
-        _LANDFILL_DEVELOPMENT_COST_CHF = _LANDFILL_DEVELOPMENT_COST_DOLLAR * 0.9952
-        _LANDFILL_COST_PER_M_SQRD = _LANDFILL_DEVELOPMENT_COST_CHF/_SHARJAH_LANDFILL_M_SQRD
-        _opening_cost_landfill = lambda x: x * _LANDFILL_COST_PER_M_SQRD
-        # Estimate for equipment cost (Conveyor belt, Air seperation system, etc.)
-        EQUIPMENT_COST = 500000
-        _opening_cost_sorting = lambda x: (x * _LANDFILL_COST_PER_M_SQRD)+EQUIPMENT_COST
-        # Giubiasco incinerator cost: 40 Million CHF in 2004 (Inflation adjusted through: https://lik-app.bfs.admin.ch/en/lik/rechner : 42’050’290 CHF) for an area of 40,000 m^
-        _opening_cost_incinerator = lambda x: x * (42050290/40000)
-        _opening_cost_list = np.array([function(self._direct_land_usage[ix]) for ix,function in enumerate([_opening_cost_sorting,_opening_cost_incinerator,_opening_cost_landfill])]).tolist()
-        opening_costs = self._G.add_custom_parameter(name='opening_costs',size=(3,3), fixed_number=_opening_cost_list)
-        return opening_costs
-    
-    def _create_population_near_links(self) -> Dict[tuple, int]:
-        """
-        Helper function. Creates population for all edges in graph (i,j). 
-        Based on the population at location i and j and the distance between them.
-        :return: Population for all edges in graph G.
-        :rtype: Dictionary[(i,j), int]
-        """
-        link_populations = dict()
-        HIGH = 0.05
-        LOW = 0.01
-        for i,j,w in self._G.G.edges(data=True):
-            weight = w['weight']
-            random_num = np.random.random_sample() * (HIGH - LOW) + LOW
-            if i == j: link_populations[(i,j)] = int(self._G.city_population[i])
-            else: link_populations[(i,j)] = round(((self._G.city_population[i] * random_num) + (self._G.city_population[j] * random_num)) * (weight * (1-random_num)))
-        self._G.custom_parameters['population_near_links'] = link_populations
-        return link_populations
-    
-    def _create_population_near_facilities(self) -> Dict[tuple, np.float64]:
-        """
-        Helper function. Creates population for all nodes in graph G. 
-        Based on the population at node i and the amount of space the facility is using up in km^2.
-        :return: Subpopulation for all nodes in graph G.
-        :rtype: Dictionary[(i,j), np.float64]
-        """
-        people_living_near_facility = dict()
-        m_sqr_to_km_sqr = lambda m_sqr: m_sqr / 1e6
-        for node in self._G.G.nodes: people_living_near_facility.update({node : np.round(self._G.city_population[node] * m_sqr_to_km_sqr(self._direct_land_usage))})
-        self._G.custom_parameters['people_living_near_facility'] = people_living_near_facility
-        return people_living_near_facility
-
-class Model_Baseline(Parameters):
+class Model_Baseline():
     """
     Class Model_Baseline, inherits Parameters.
     Creates a baseline model object, which is based on Olapiriyakul, Sun & Pannakkong, Warut & Kachapanya, Warith & Starita, Stefano. (2019).
     """
-    def __init__(self, G: Graph, seed : IntFloat = 0, plot_graph : Optional[bool] = False,verbose : Optional[bool] = False) -> None:
+    def __init__(self, parameters : Parameters, plot_graph : Optional[bool] = False,verbose : Optional[bool] = False) -> None:
         """
         Model_Baseline constructor. Public access to solved_model : docplex.mp.solution.SolveSolution | None
         :param G: Graph object from generate_graph.py
         :param seed: The seed to generate random numbers from.
         """
-        super().__init__(G, seed)
+        self._parameters = parameters
         self.model = Model(name="Baseline")
         self._verbose = verbose
         self._plot_graph = plot_graph
-        self._ij_list = [(i,j,w['weight']) for i, j, w in self._G.G.edges(data=True) if i in self._G.collection_locations and j in self._sorting_facilities]
-        self._jk_list = [(j,k,w['weight']) for j, k, w in self._G.G.edges(data=True) if (j in self._sorting_facilities and k in self._incinerator_facilities)]
-        self._jkp_list = [(j,kp,w['weight']) for j, kp, w in self._G.G.edges(data=True) if j in self._sorting_facilities and kp in self._landfill_facilities]
+        self._ij_list = [(i,j,w['weight']) for i, j, w in self._parameters._G.G.edges(data=True) if i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities]
+        self._jk_list = [(j,k,w['weight']) for j, k, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities)]
+        self._jkp_list = [(j,kp,w['weight']) for j, kp, w in self._parameters._G.G.edges(data=True) if j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities]
         self._S = 0
         self._I = 1
         self._L = 2
         self._create_decision_variables()
-        self._sorting_tuple = (self._S, self._y_sorting, self._sorting_facilities)
-        self._incinerator_tuple = (self._I, self._y_incinerator, self._incinerator_facilities)
-        self._landfill_tuple = (self._L, self._y_landfill, self._landfill_facilities)
+        self._sorting_tuple = (self._S, self._y_sorting, self._parameters._sorting_facilities)
+        self._incinerator_tuple = (self._I, self._y_incinerator, self._parameters._incinerator_facilities)
+        self._landfill_tuple = (self._L, self._y_landfill, self._parameters._landfill_facilities)
         self.solved_model : Union[docplex.mp.solution.SolveSolution, None] = None
         self.minimization = str()
         self.solved_graph : nx.DiGraph = None
@@ -189,9 +56,9 @@ class Model_Baseline(Parameters):
         x - The number of trips on edges (i,j), (j,k), and (j,k').
         f - The amount of solid waste transported on edges (i,j), (j,k), and (j,k').
         """
-        self._y_sorting = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._sorting_facilities for j in self._range_of_facility_sizes}
-        self._y_incinerator = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._incinerator_facilities for j in self._range_of_facility_sizes}
-        self._y_landfill = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._landfill_facilities for j in self._range_of_facility_sizes}
+        self._y_sorting = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters._sorting_facilities for j in self._parameters._range_of_facility_sizes}
+        self._y_incinerator = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters._incinerator_facilities for j in self._parameters._range_of_facility_sizes}
+        self._y_landfill = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters._landfill_facilities for j in self._parameters._range_of_facility_sizes}
         self._x_ij = {(i,j) : self.model.integer_var(name=f'x_{i}_{j}') for i,j,_ in self._ij_list}
         self._x_jk = {(j,k) : self.model.integer_var(name=f'x_{j}_{k}') for j,k,_ in self._jk_list}
         self._x_jkp = {(j,kp) : self.model.integer_var(name=f'x_{j}_{kp}') for j,kp,_ in self._jkp_list}
@@ -213,9 +80,14 @@ class Model_Baseline(Parameters):
         """
         def _dictionary_array(array : List[tuple], inverse : bool = False) -> dict:
             """
-            Private helper function. Creates a dictionary out of an array.
-            :param array: List with tuple, to be made a dictionary out of.
-            :return: The created dictionary
+            It takes a list of tuples and returns a dictionary
+            
+            :param array: The array to be made a dictionary out of
+            :type array: List[tuple]
+            :param inverse: If True, the dictionary will be inverted, defaults to False
+            :type inverse: bool (optional)
+            :return: A dictionary with the keys being the first element of the tuple and the values
+            being the second element of the tuple.
             """
             dictionary = dict()
             for i,j,_ in array:
@@ -229,40 +101,57 @@ class Model_Baseline(Parameters):
         
         def _size_dependent_capacity_constraint(type_of_constraint : int, y_variable : Model.binary_var, size_dependent_f : list, facilities : list) -> None:
             """
-            Private helper function, used for the creation of constraint 3,4, and 5. 
-
-            :param type_of_constraint: 0 for Sorting, 1 for Incinerator, and 2 for Landfill 
-            :param y_variable: The y decision variable to be used. 
-            :param size_dependent_f: List of sums of the decision variable f: 
-            collection points i for sorting, sorting facilities j for incinerators, sorting facilities j for landfills.
-            :param facilities: Facility locations to loop over.
+            The function takes in a type of constraint, a decision variable y, a list of sums of the
+            decision variable f, and a list of facilities. It then creates a list of the sum of the
+            decision variable multiplied by the facility storage capacity, and then adds a constraint to
+            the model that the sum of the decision variables f is less than or equal to the sum of the
+            decision variable y multiplied by the facility storage capacity.
+            
+            :param type_of_constraint: 0 for Sorting, 1 for Incinerator, and 2 for Landfill
+            :type type_of_constraint: int
+            :param y_variable: The y decision variable to be used
+            :type y_variable: Model.binary_var
+            :param size_dependent_f: List of sums of the decision variable f:
+            :type size_dependent_f: list
+            :param facilities: The list of facilities to loop over
+            :type facilities: list
             """
-            size_capacity= [self.model.sum(self.facility_storage_capacities[type_of_constraint][l] * y_variable[(j,l)] \
-                 for l in self._range_of_facility_sizes) for j in facilities]
+           
+            size_capacity= [self.model.sum(self._parameters.facility_storage_capacities[type_of_constraint][l] * y_variable[(j,l)] \
+                 for l in self._parameters._range_of_facility_sizes) for j in facilities]
             for ix in range(0, len(size_dependent_f)):
                 self.model.add_constraint(size_dependent_f[ix] <= size_capacity[ix])
        
         def _transportation_capacity_limitations(edge_list : list, x_variable : Model.integer_var, f_variable : Model.continuous_var) -> None:
             """
-            Private helper function, used for the creation of constraint 6,7, and 8. 
+            For each edge in the edge list, add a constraint that the flow on that edge is less than
+            the maximum amount of transport times the decision variable for that edge. 
             
             :param edge_list: Edges to loop over (i,j), (j,k), or (j,k')
-            :param x_variable: The x decision variable to be used. 
-            :param f_variable: The f decision variable to be used.
+            :type edge_list: list
+            :param x_variable: The x decision variable to be used
+            :type x_variable: Model.integer_var
+            :param f_variable: The f decision variable to be used
+            :type f_variable: Model.continuous_var
             """
             for i,j,_ in edge_list:
-                for l in range(0,len(self.maximum_amount_transport)):
-                    self.model.add_constraint(f_variable[(i,j)] <= self.maximum_amount_transport[l] * x_variable[(i,j)])
+                for l in range(0,len(self._parameters.maximum_amount_transport)):
+                    self.model.add_constraint(f_variable[(i,j)] <= self._parameters.maximum_amount_transport[l] * x_variable[(i,j)])
         
         def _one_size_selection_constraint(facilities : list, y_variable : Model.binary_var) -> None:
             """
-
-            Private helper function, used for the creation of constraint 9, 10, and 11. 
-            :param facilities: Facility locations to loop over.
-            :param y_variable: The y decision variable to be used. 
+            For each facility location, the sum of the y decision variables for each facility size
+            must be less than or equal to 1. 
+            
+            This is a constraint that is used for all three of the facility size selection constraints.
+            
+            :param facilities: Facility locations to loop over
+            :type facilities: list
+            :param y_variable: The y decision variable to be used
+            :type y_variable: Model.binary_var
             """
             for i in facilities:
-                self.model.add_constraint(self.model.sum(y_variable[(i,l)] for l in self._range_of_facility_sizes) <= 1)
+                self.model.add_constraint(self.model.sum(y_variable[(i,l)] for l in self._parameters._range_of_facility_sizes) <= 1)
         
         _ij_for_i_dict = _dictionary_array(self._ij_list)
         _jk_for_j_dict = _dictionary_array(self._jk_list)
@@ -275,7 +164,7 @@ class Model_Baseline(Parameters):
         # Constraints 
         # Constraint 1: Outflow of waste from any collection center i must be equal to the amount of available waste at i
         for key, val in _ij_for_i_dict.items():
-            self.model.add_constraint(self.model.sum(self._f_ij[(key,j)] for j in val) == self._G.supplies[key][0])
+            self.model.add_constraint(self.model.sum(self._f_ij[(key,j)] for j in val) == self._parameters._G.supplies[key][0])
         # Constraint 2: Flow balance, inflow of waste at sorting facility j is ENTIRELY forwarded to incinerator k or landfill k'
         _sum_f_ij_for_j= [self.model.sum(self._f_ij[(i,j)] for i in i_values) for j, i_values in _ij_for_j_dict.items()]
         _sum_f_jk_for_j = [self.model.sum(self._f_jk[(j,k)] for k in k_values) for j, k_values in _jk_for_j_dict.items()]
@@ -285,13 +174,13 @@ class Model_Baseline(Parameters):
         for ix in range(0, len(_sum_f_jkp_for_j)):
             self.model.add_constraint(_sum_f_ij_for_j[ix] == _sum_f_jkp_for_j[ix])
         # Constraint 3: Size dependent capacity constraint for sorting facilities
-        _size_dependent_capacity_constraint(self._S, self._y_sorting, _sum_f_ij_for_j, self._sorting_facilities)
+        _size_dependent_capacity_constraint(self._S, self._y_sorting, _sum_f_ij_for_j, self._parameters._sorting_facilities)
         # Constraint 4: Size dependent capcity constraint for incinerator facilities
         _sum_f_jk_for_k = [self.model.sum(self._f_jk[(j,k)] for j in j_value) for k, j_value in _jk_for_k_dict.items()] 
-        _size_dependent_capacity_constraint(self._I, self._y_incinerator, _sum_f_jk_for_k, self._incinerator_facilities)
+        _size_dependent_capacity_constraint(self._I, self._y_incinerator, _sum_f_jk_for_k, self._parameters._incinerator_facilities)
         # Constraint 5: Size dependent capcity constraint for landfill facilities
         _sum_f_jk_for_kp = [self.model.sum(self._f_jkp[(j,kp)]for j in j_value) for kp, j_value in _jkp_for_kp_dict.items()] 
-        _size_dependent_capacity_constraint(self._L, self._y_landfill, _sum_f_jk_for_kp, self._landfill_facilities)
+        _size_dependent_capacity_constraint(self._L, self._y_landfill, _sum_f_jk_for_kp, self._parameters._landfill_facilities)
         # Constraint (6, 7, 8) : Transportation capacity limitations for ((i, j), (j, k), (j, kp))
         _ij_tuple = (self._ij_list, self._x_ij, self._f_ij)
         _jk_tuple = (self._jk_list, self._x_jk, self._f_jk)
@@ -299,40 +188,54 @@ class Model_Baseline(Parameters):
         for edge_list, x_decision_value, f_decision_value in [_ij_tuple, _jk_tuple, _jkp_tuple]:
             _transportation_capacity_limitations(edge_list, x_decision_value, f_decision_value)
         # Constraint (9, 10, 11): One size selection for (sorting, incinerator, landfill) facilities
-        _sorting_tuple = (self._sorting_facilities, self._y_sorting)
-        _incinerator_tuple = (self._incinerator_facilities, self._y_incinerator)
-        _landfill_tuple = (self._landfill_facilities, self._y_landfill)
+        _sorting_tuple = (self._parameters._sorting_facilities, self._y_sorting)
+        _incinerator_tuple = (self._parameters._incinerator_facilities, self._y_incinerator)
+        _landfill_tuple = (self._parameters._landfill_facilities, self._y_landfill)
         for facilities, decision_values in [_sorting_tuple, _incinerator_tuple, _landfill_tuple]:
             _one_size_selection_constraint(facilities, decision_values)
     
     def minimize_cost(self, minimize : Optional[bool] = True) -> None:
         """
-        Public objective minimization function Fc. 
-        Minimizes the overall cost which is the sum of the fixed costs to open a facility of size l plus the operational
-        costs of transporting and managing solid waste flow across the network. Subsequently, solves the model according to this function.
-        :return: The solved model.
+        The function `minimize_cost` is used to create the objective function of the model. The
+        objective function is the sum of the opening costs of the facilities and the operational costs
+        of the facilities
+        
+        :param minimize: If True, the model will be minimized. If False, then the total opening cost is returned, defaults to True
+        :type minimize: Optional[bool] (optional)
+        :return: The total opening cost sum.
         """
+        
         def _create_opening_costs_sum(type_of_facility : int, y_variable : Model.binary_var, facilities : list) -> docplex.mp.linear.LinearExpr:
             """
-            Private helper function. Used to create the linear expression of sums to open a facility of size l.
-
-            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill.
-            :param y_variable: The y decision variable to be used. 
-            :param facilities: Facility locations to loop over.
+            The function takes in a type of facility, a decision variable, and a list of facilities
+            and returns a linear expression of the sum of the opening costs of the facilities
+            
+            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill
+            :type type_of_facility: int
+            :param y_variable: The y decision variable to be used
+            :type y_variable: Model.binary_var
+            :param facilities: The list of facilities to loop over
+            :type facilities: list
             :return: The opening costs linear expression from the class docplex.mp.linear.LinearExpr
             """
-            return self.model.sum(y_variable.get((i,j)) * self.opening_costs[type_of_facility][j] for i in facilities for j in self._range_of_facility_sizes)
+            return self.model.sum(y_variable.get((i,j)) * self._parameters.opening_costs[type_of_facility][j] for i in facilities for j in self._parameters._range_of_facility_sizes)
         
         def _create_operational_costs_sum(type_of_facility : int, x_variable : Model.integer_var, edge_list : list) -> docplex.mp.linear.LinearExpr:
             """
-            Private helper function. Used to create the linear expression of sums of costs to transport and manage the solid waste flow.
-
-            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill.
-            :param x_variable: The x decision variable to be used. 
-            :param edge_list:  Edges to loop over (i,j), (j,k), or (j,k')
-            :return: The operational costs linear expression from the class docplex.mp.linear.LinearExpr
+            The function takes in a type of facility, a decision variable, and a list of edges and
+            returns a linear expression of the sum of the costs to transport and manage the solid waste
+            flow
+            
+            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill
+            :type type_of_facility: int
+            :param x_variable: The x decision variable to be used
+            :type x_variable: Model.integer_var
+            :param edge_list: A list of tuples of the form (i,j) where i and j are the nodes of the
+            graph
+            :type edge_list: list
+            :return: The sum of the operational costs for the facility type.
             """
-            return self.model.sum((t_ij + self.operational_costs[type_of_facility]) * x_variable[(i,j)] for i, j, t_ij in edge_list)
+            return self.model.sum((t_ij + self._parameters.operational_costs[type_of_facility]) * x_variable[(i,j)] for i, j, t_ij in edge_list)
 
         _sorting_operation_tuple = (self._S, self._x_ij, self._ij_list)
         _incinerator_operation_tuple = (self._I, self._x_jk, self._jk_list)
@@ -346,21 +249,29 @@ class Model_Baseline(Parameters):
     
     def minimize_land_usage(self, minimize : Optional[bool] = True) -> None:
         """
-        Public objective minimization function Fu.
-        Used to measure the average land-use stress. Sum of all land-use ratios across all candidate locations.
-        Subsequently, solves the model.
-        :return: The solved model.
+        The function `minimize_land_usage` is used to minimize the land usage objective
+        
+        :param minimize: Whether or not to minimize the land usage. If False, then the land usage linear
+        expression is returned, defaults to True
+        :type minimize: Optional[bool] (optional)
+        :return: The total land usage sum.
         """
+        
         def _create_land_usage_sum(type_of_facility : int, y_variable : Model.binary_var, facilities : list) -> docplex.mp.linear.LinearExpr:
             """
-            Private helper function. Used to create the land usage linear expression.
-
-            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill.
-            :param y_variable: The y decision variable to be used. 
-            :param facilities: Facility locations to loop over.
+            The function takes in a type of facility, a decision variable, and a list of facilities
+            and returns a linear expression that sums the land stress ratios for each facility and size
+            
+            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill
+            :type type_of_facility: int
+            :param y_variable: The y decision variable to be used
+            :type y_variable: Model.binary_var
+            :param facilities: list of facility locations
+            :type facilities: list
             :return: The land usage linear expression from the class docplex.mp.linear.LinearExpr
             """
-            return self.model.sum(self.land_stress_ratios[type_of_facility][l] * y_variable[(i,l)] for i in facilities for l in self._range_of_facility_sizes)
+           
+            return self.model.sum(self._parameters.land_stress_ratios[type_of_facility][l] * y_variable[(i,l)] for i in facilities for l in self._parameters._range_of_facility_sizes)
         _land_usage_objectives = [_create_land_usage_sum(tuple_[0], tuple_[1], tuple_[2]) for tuple_ in [self._sorting_tuple, self._incinerator_tuple, self._landfill_tuple]]
         _total_land_usage_sum = _land_usage_objectives[self._S] + _land_usage_objectives[self._I] + _land_usage_objectives[self._L]
         self.minimization = "Land Usage Objective"
@@ -369,30 +280,47 @@ class Model_Baseline(Parameters):
 
     def minimize_health_impact(self, minimize : Optional[bool] = True) -> None:
         """
-        Public objective minimization function Fh.
-        Minimize the impact of transportation and facilities on the population's health.
-        Subsequently, solve the model.
-        :return: The solved model.
+        The function `minimize_health_impact` takes in a boolean value `minimize` and returns `None`. If
+        `minimize` is `True`, the function minimizes the health impact of the transportation and
+        facilities on the population. If `minimize` is `False`, the function returns the health impact
+        of the transportation and facilities on the population
+        
+        :param minimize: Whether to minimize the objective or not, defaults to True
+        :type minimize: Optional[bool] (optional)
+        :return: The total health impact sum.
         """
+        
         def _create_facility_health_impact_sum(type_of_facility : int, y_variable : Model.binary_var, facilities : list) -> docplex.mp.linear.LinearExpr:
             """
-            Private helper function. Creates the linear expression for the facility health impact.
-
-            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill.
-            :param y_variable: The y decision variable to be used. 
-            :param facilities: Facility locations to loop over.
-            :return: The facility health impact linear expression from the class docplex.mp.linear.LinearExpr
+            The function creates a linear expression that sums the product of the population near a
+            facility, the DALY per person, and the decision variable for the facility
+            
+            :param type_of_facility: 0 for Sorting, 1 for Incinerator, and 2 for Landfill
+            :type type_of_facility: int
+            :param y_variable: The y decision variable to be used
+            :type y_variable: Model.binary_var
+            :param facilities: Facility locations to loop over
+            :type facilities: list
+            :return: The facility health impact linear expression from the class
+            docplex.mp.linear.LinearExpr
             """
-            return self.model.sum(self.population_near_facilities[i][type_of_facility][l] * self.facility_daly_per_person[i][l] * y_variable[(i,l)] for i in facilities for l in self._range_of_facility_sizes)
+            return self.model.sum(self._parameters.population_near_facilities[i][type_of_facility][l] * self._parameters.facility_daly_per_person[i][l] * y_variable[(i,l)] for i in facilities for l in self._parameters._range_of_facility_sizes)
+
         def _create_transport_health_impact_sum(x_variable : Model.integer_var, edge_list : list) -> docplex.mp.linear.LinearExpr:
             """
-            Private helper function. Creates the linear expression for the transportation health impact.
-
-            :param x_variable: The x decision variable to be used. 
-            :param edge_list:  Edges to loop over (i,j), (j,k), or (j,k')
-            :return: The transportation health impact linear expression from the class docplex.mp.linear.LinearExpr
+            The function takes in a decision variable and a list of edges, and returns a linear
+            expression that sums over the population of each edge times the DALYs of each edge times the
+            decision variable
+            
+            :param x_variable: The x decision variable to be used
+            :type x_variable: Model.integer_var
+            :param edge_list: list of tuples of the form (i,j,k) where i,j,k are nodes in the network
+            :type edge_list: list
+            :return: The sum of the population of the link times the dalys of the link times the x
+            variable of the link.
             """
-            return self.model.sum(self.link_populations[(i,j)]  * self.link_dalys[(i,j)][1] * x_variable[(i,j)] for i,j,_ in edge_list)
+            return self.model.sum(self._parameters.link_populations[(i,j)]  * self._parameters.link_dalys[(i,j)][1] * x_variable[(i,j)] for i,j,_ in edge_list)
+
         _sorting_transport_health_tuple = (self._x_ij, self._ij_list)
         _incinerator_transport_health_tuple = (self._x_jk, self._jk_list)
         _landfill_transport_health_tuple = (self._x_jkp, self._jkp_list)
@@ -406,20 +334,28 @@ class Model_Baseline(Parameters):
     
     def solve_model(self, list_of_functions : List[Any]) -> pd.DataFrame:
         """
-        Public function to solve the created model.
-        :return: The solved model.
+        This function solves the model and returns a dataframe with the results
+        
+        :param list_of_functions: A list of functions that will be used to solve the model
+        :type list_of_functions: List[Any]
+        :return: A dataframe with the results of the model.
         """
         if not isinstance(list_of_functions, list): list_of_functions = [list_of_functions]
         df = pd.DataFrame(columns=["Objective Name","Cost Objective", "Land Usage Objective", "Health Impact Objective"])
         _figs = []
+        log = False
+        if self._verbose: log=True
         minimization_names = []
         for minimize_function in list_of_functions:
             minimize_function()
             minimization_names.append(self.minimization)
             self.model.print_information()
-            self.solved_model = self.model.solve()
+            tic = time.perf_counter()
+            self.solved_model = self.model.solve(clean_before_solve=True, log_output = log)
+            toc = time.perf_counter()
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
             if self._verbose:
+                print(f"Elapsed time for {self.minimization} was {toc - tic:0.4f} seconds")
                 self.solved_model.display()
                 self.model.export_as_lp("./")
             self.model.remove_objective()
@@ -459,49 +395,97 @@ class Model_Baseline(Parameters):
         return df
     
     def _calculate_cost(self, y_decisions : List[Tuple[Any, int]], x_decisions : Dict[tuple, Any]) -> Tuple[float, float]:
+        """
+        For each facility, if it is a sorting facility, add the opening cost of a sorting facility to
+        the total opening cost. If it is an incinerator facility, add the opening cost of an incinerator
+        facility to the total opening cost. If it is a landfill facility, add the opening cost of a
+        landfill facility to the total opening cost. For each edge, add the operational cost of the edge
+        to the total operational cost
+        
+        :param y_decisions: a list of tuples, where each tuple is a facility and its level of operation
+        :type y_decisions: List[Tuple[Any, int]]
+        :param x_decisions: a dictionary of tuples to floats, where the tuples are the edges and the
+        floats are the amount of waste that is sent along that edge
+        :type x_decisions: Dict[tuple, Any]
+        :return: The opening cost and the operational cost.
+        """
         _opening_cost = 0
-        _opening_cost_array = self.opening_costs
+        _opening_cost_array = self._parameters.opening_costs
         for j, l in y_decisions:
-            if j in self._sorting_facilities:  _opening_cost += _opening_cost_array[0][l]
-            elif j in self._incinerator_facilities: _opening_cost += _opening_cost_array[1][l]
-            elif j in self._landfill_facilities: _opening_cost += _opening_cost_array[2][l]
+            if j in self._parameters._sorting_facilities:  _opening_cost += _opening_cost_array[0][l]
+            elif j in self._parameters._incinerator_facilities: _opening_cost += _opening_cost_array[1][l]
+            elif j in self._parameters._landfill_facilities: _opening_cost += _opening_cost_array[2][l]
         _operational_cost = 0
-        _operational_cost_array = self.operational_costs
+        _operational_cost_array = self._parameters.operational_costs
         for index, edge_list in enumerate([self._ij_data, self._jk_data, self._jkp_data]):
             for i, j, t_ij in edge_list:
                 _operational_cost += (t_ij + _operational_cost_array[index]) * x_decisions[(i,j)]
         return (_opening_cost, _operational_cost)
     
     def _calculate_land_usage(self, y_decisions : List[Tuple[Any, int]]) -> float:
+        """
+        The function calculates the land usage of the decision variables
+        
+        :param y_decisions: a list of tuples, where each tuple is (facility, location)
+        :type y_decisions: List[Tuple[Any, int]]
+        :return: The land usage is being returned.
+        """
         land_usage = 0
-        land_stress_ratio_array = self.land_stress_ratios
+        land_stress_ratio_array = self._parameters.land_stress_ratios
         for j, l in y_decisions:
-            if j in self._sorting_facilities:  land_usage += land_stress_ratio_array[0][l]
-            elif j in self._incinerator_facilities: land_usage += land_stress_ratio_array[1][l]
-            elif j in self._landfill_facilities: land_usage += land_stress_ratio_array[2][l]
+            if j in self._parameters._sorting_facilities:  land_usage += land_stress_ratio_array[0][l]
+            elif j in self._parameters._incinerator_facilities: land_usage += land_stress_ratio_array[1][l]
+            elif j in self._parameters._landfill_facilities: land_usage += land_stress_ratio_array[2][l]
         return land_usage
 
     def _calculate_health_impact(self, y_decisions : List[Tuple[Any, int]], x_decisions : Dict[tuple, Any]) -> Tuple[float, float]:
+        """
+        For each facility, we multiply the population near the facility by the dalys per person for that
+        facility. 
+        
+        For each transport link, we multiply the population near the link by the dalys per person for
+        that link. 
+        
+        We then sum all of these values to get the total health impact.
+        
+        :param y_decisions: a list of tuples, where each tuple is a facility and a facility size.
+        :type y_decisions: List[Tuple[Any, int]]
+        :param x_decisions: a dictionary of the decisions made for the transport links. The keys are
+        tuples of the form (i,j) where i and j are the nodes that the link connects. The values are the
+        decisions made for that link.
+        :type x_decisions: Dict[tuple, Any]
+        :return: the health impact of the transport and facility decisions.
+        """
         facility_health_impact = 0
-        pop_near_facilities = self.population_near_facilities
-        facility_dalys = self.facility_daly_per_person
+        pop_near_facilities = self._parameters.population_near_facilities
+        facility_dalys = self._parameters.facility_daly_per_person
         for j, l in y_decisions:
-            if j in self._sorting_facilities:  facility_health_impact += pop_near_facilities[j][0][l] * facility_dalys[j][l]
-            elif j in self._incinerator_facilities: facility_health_impact += pop_near_facilities[j][1][l] * facility_dalys[j][l]
-            elif j in self._landfill_facilities: facility_health_impact += pop_near_facilities[j][2][l] * facility_dalys[j][l]
+            if j in self._parameters._sorting_facilities:  facility_health_impact += pop_near_facilities[j][0][l] * facility_dalys[j][l]
+            elif j in self._parameters._incinerator_facilities: facility_health_impact += pop_near_facilities[j][1][l] * facility_dalys[j][l]
+            elif j in self._parameters._landfill_facilities: facility_health_impact += pop_near_facilities[j][2][l] * facility_dalys[j][l]
 
         transport_health_impact = 0
-        population_for_edge = self.link_populations
-        daly_for_edge = self.link_dalys
+        population_for_edge = self._parameters.link_populations
+        daly_for_edge = self._parameters.link_dalys
         for edge_list in [self._ij_data, self._jk_data, self._jkp_data]:
             for i,j,_ in edge_list:
                 transport_health_impact += population_for_edge[(i,j)] * daly_for_edge[(i,j)][1] * x_decisions[(i,j)] 
         return (transport_health_impact, facility_health_impact)
 
     def create_dataframe(self, df : pd.DataFrame, name : Optional[str] = None) -> pd.DataFrame:
-        self._ij_data = [(i,j,w['weight']) for i, j, w in self.solved_graph.edges(data=True) if i in self._G.collection_locations and j in self._sorting_facilities]
-        self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if j in self._sorting_facilities and k in self._incinerator_facilities]
-        self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if j in self._sorting_facilities and kp in self._landfill_facilities]
+        """
+        This function takes in a dataframe and a name, and returns a dataframe with the name and the
+        objective values of the model
+        
+        :param df: The dataframe to append the results to
+        :type df: pd.DataFrame
+        :param name: The name of the model
+        :type name: Optional[str]
+        :return: The dataframe is being returned.
+        """
+        self._ij_data = [(i,j,w['weight']) for i, j, w in self.solved_graph.edges(data=True) if i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities]
+        self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities) or (j in self._parameters._incinerator_facilities and k in self._parameters._sorting_facilities)]
+        self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities) or (j in self._parameters._landfill_facilities and kp in self._parameters._sorting_facilities)]
         _y_decisions = [(ast.literal_eval(key[1]), int(key[2])) for key, _ in self.df_solved_model_list if 'y' in key]
         _x_decisions = {(ast.literal_eval(key[1]), ast.literal_eval(key[2])): value for key, value in self.df_solved_model_list if 'x' in key}
         _cost_objective : Tuple[float, float] = self._calculate_cost(_y_decisions, _x_decisions)
@@ -513,17 +497,26 @@ class Model_Baseline(Parameters):
         return df
 
     def plot_graph(self, figure_name : Optional[str] = None):
-        def _edge_colours(G, value1: int, value2: int):
+        """
+        This function takes in a solved model and plots the graph with the edges coloured based on the
+        edge weights
+        
+        :param figure_name: The name of the figure
+        :type figure_name: Optional[str]
+        :return: The plotly figure object.
+        """
+        def _edge_colours(G, value1: int, value2: int) -> Tuple[list, list, str, int, str]:
             """
-            private helper Function _edge_colours
-            Creates the edge colours based on the edge weights
-            :param value1: The low value of the range.
-            :param value2: The high value of the range.
+            This function takes in a graph, and two values, and returns the x and y coordinates of the
+            edges, the color of the edges, the width of the edges, and the name of the edges
+
+            :param G: The graph object
+            :param value1: The low value of the range
             :type value1: int
+            :param value2: The high value of the range
             :type value2: int
-            :return: Edge X coordinates, Edge Y coordinates, Color HEX, line width, Name in Legend
-            :rtype: list, list, str, int, str
-            """            
+            :return: The edge_x and edge_y coordinates, the color, the width and the name of the line.
+            """
             edge_x = []
             edge_y = []
             for i,j,w in G.edges(data=True):
@@ -572,7 +565,7 @@ class Model_Baseline(Parameters):
                             borderwidth=2
                         ),
                         annotations=[ dict(
-                                text= f"<b>Total Unsorted Supply:</b> {sum([us for us,_  in self._G.supplies.values()])}",
+                                text= f"<b>Total Unsorted Supply:</b> {sum([us for us,_  in self._parameters._G.supplies.values()])}",
                                 showarrow=False,
                                 align = 'left',
                                 x=0.005, y=-0.002 ) ],
@@ -599,16 +592,16 @@ class Model_Baseline(Parameters):
         _data_locations_y = {ast.literal_eval(key[1]):key[2] for key in self._data_locations if 'y' in key}
         dictionary_values = {0 : "Small", 1: "Medium", 2 : "Large"}
         for node in self.solved_graph.nodes():
-            if node in self._G.collection_locations: 
+            if node in self._parameters._G.collection_locations: 
                 _node_colours[node] = ["Collection Center", '#D7D2CB']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Unsorted Supply: {self._G.supplies[node][0]}"
-            elif node in self._sorting_facilities: 
+                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Unsorted Supply: {self._parameters._G.supplies[node][0]}"
+            elif node in self._parameters._sorting_facilities: 
                 _node_colours[node] = ["Sorting Facility", '#6AC46A']
                 _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
-            elif node in self._incinerator_facilities: 
+            elif node in self._parameters._incinerator_facilities: 
                 _node_colours[node] = ["Incinerator Facility", '#952E25']
                 _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
-            elif node in self._landfill_facilities: 
+            elif node in self._parameters._landfill_facilities: 
                 _node_colours[node] = ["Landfill Facility", '#00C0F0']
                 _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
         
@@ -642,16 +635,19 @@ class Multiobjective_model(Model_Baseline):
     Class Multiobjective_model. Inherits Model_Baseline.
     Solve a min-max version of the single objective functions combined.
     """
-    def __init__(self, Graph : nx.Graph, df : pd.DataFrame, seed : IntFloat = 0) -> None:
+    def __init__(self, parameters : Parameters, df : pd.DataFrame) -> None:
         """
         Multiobjective_model constructor.
         Initializes the class, creates the deviations, and adds the minimizing variable.
-        :param Graph: The generated graph created by generate_graph.graph
-        :param df: The pandas dataframe from the single optimizations.
-        :seed: The seed for random number generation.
+
+        :param parameters: The parameters for the optimization
+        :type parameters: Parameters
+        :param df: The pandas dataframe from the single optimizations
+        :type df: pd.DataFrame
         """
-        super().__init__(Graph, seed)
+        super().__init__(parameters)
         assert len(df) > 1, f"Must be atleast two functions being compared for a multiobjective optimization. Got {len(df)}"
+        self.model.parameters.mip.tolerances.mipgap = 0.005
         self.org_df : pd.DataFrame = df.copy()
         self.df : pd.DataFrame = df.copy()
         self.df.set_index('Objective Name', inplace=True)
@@ -676,17 +672,21 @@ class Multiobjective_model(Model_Baseline):
         return deviations
     def _create_multi_constraints(self, combination : Tuple[int, int]) -> None:
         """
-        Private helper function.
-        Adds the constraint that the deviation must be smaller or equal to the continuous variable z.
+        For each combination of the deviations, add a constraint that the deviation must be smaller or
+        equal to the continuous variable z
+        
         :param combination: A combination created by itertools.combinations
+        :type combination: Tuple[int, int]
         """
         for comb in combination:
             self.model.add_constraint(self.deviations[comb] <= self._z, ctname = f"constraint_{comb}")
     def _remove_multi_constraints(self, combination: Tuple[int, int]) -> None:
         """
-        Private helper function.
-        Removes the constraints created in _create_multi_constraints() such that there is no overlap in constraints.
+        Removes the constraints created in _create_multi_constraints() such that there is no overlap
+        in constraints
+        
         :param combination: A combination created by itertools.combinations
+        :type combination: Tuple[int, int]
         """
         self.model.remove_objective()
         for comb in combination:
@@ -694,19 +694,24 @@ class Multiobjective_model(Model_Baseline):
 
     def solve_multi_objective(self, plot_graph : Optional[bool] = False, verbose : Optional[bool] = False) -> pd.DataFrame:
         """
-        Public function.
-        Solves the multi objective min-max problem.
-        Goes through all combinations of single optimization functions and solves each one.
-        :param plot_graph: Plot the created graph for each combination.
-        :param verbose: Displays the model results and exports the problem to lp.
+        The function solves the multi objective min-max problem. It goes through all combinations of
+        single optimization functions and solves each one.
+        
+        :param plot_graph: Plot the created graph for each combination, defaults to False
+        :type plot_graph: Optional[bool] (optional)
+        :param verbose: Prints the model results and exports the problem to lp, defaults to False
+        :type verbose: Optional[bool] (optional)
         :return: The dataframe object which includes all of the calculations for the various objectives.
         """
+        
         def _get_key(dict : Dict[str, list], val : int) -> str:
             """
-            Private helper function.
-            Used to get a key from a value array in a dictionary.
-            :param dict: The dictionary which is looped through.
-            :param val: The value which is searched for.
+            It loops through a dictionary and returns the key of the value that is passed in
+            
+            :param dict: The dictionary which is looped through
+            :type dict: Dict[str, list]
+            :param val: The value which is searched for
+            :type val: int
             :return: The key of the value.
             """
             for key, value in dict.items():
@@ -714,15 +719,26 @@ class Multiobjective_model(Model_Baseline):
                     return key
         _figures = []
         plot_names = []
+        log = False
+        if verbose: log=True
         all_double_combinations = list(combinations([i for i in range(0,len(self._optimal_values))], 2))
-        if len(self._optimal_values) == 3: all_double_combinations.append((0,1,2))
+        if len(self._optimal_values) == 3: all_double_combinations.insert(0,(0,1,2))
         for combination in all_double_combinations:  
             self.model.minimize(self._z)
             self._create_multi_constraints(combination)
             self.model.print_information()
-            self.solved_model = self.model.solve()
+            self.model.round_solution = True
+            tic = time.perf_counter()
+            self.solved_model = self.model.solve(clean_before_solve=True,log_output=log)
+            toc = time.perf_counter()
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
+            _name = ""
+            for idx, comb in enumerate(combination):
+                if idx < len(combination)-1 : _name += f"{_get_key(self.column_dict, comb)}, "
+                else: _name += f"and {_get_key(self.column_dict, comb)}"
             if verbose:
+                print(f"Elapsed time for {_name} was {toc - tic:0.4f} seconds")
+                print(self.model.solve_details)
                 self.solved_model.display()
                 self.model.export_as_lp("./")
             self._remove_multi_constraints(combination)
@@ -730,6 +746,7 @@ class Multiobjective_model(Model_Baseline):
             df_solved_model = self.solved_model.as_df()
             self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values if round(value) > 0]
             self._data_locations = [key for key, _ in self.df_solved_model_list]
+            
             # Get the distance for all cities between all cities as our cost edges.
             for i in range(len(self._data_locations)):
                 if 'f' in self._data_locations[i]:
@@ -739,10 +756,7 @@ class Multiobjective_model(Model_Baseline):
                     distance = np.round(((first_node[0] - second_node[0])**2 + (first_node[1] - second_node[1])**2)**0.5)
                     # Add the edge to a graph with the distance as an edge weight.
                     self.solved_graph.add_edge(first_node, second_node, weight=distance)
-            _name = ""
-            for idx, comb in enumerate(combination):
-                if idx < len(combination)-1 : _name += f"{_get_key(self.column_dict, comb)}, "
-                else: _name += f"and {_get_key(self.column_dict, comb)}"
+            
             self.org_df = self.create_dataframe(self.org_df, name = _name)
             plot_names.append(_name)
             if plot_graph: _figures.append(self.plot_graph(f"Solution for {_name}"))
@@ -765,12 +779,14 @@ class Multiobjective_model(Model_Baseline):
                 col_num += 1
             _total_fig.show()
         return self.org_df
+
 if __name__ == '__main__':
     set_seed = 0
     RandomGraph = Graph(8,baseline=True,plot_graph=False, seed=set_seed)
-    model_baseline = Model_Baseline(RandomGraph, plot_graph=False, seed=set_seed, verbose=False)
+    parameters = Parameters(RandomGraph, set_seed)
+    model_baseline = Model_Baseline(parameters, plot_graph=False, verbose=False)
     list_of_functions = [model_baseline.minimize_cost, model_baseline.minimize_health_impact]
     data = model_baseline.solve_model(list_of_functions)
-    mo = Multiobjective_model(RandomGraph, df = data, seed=set_seed) 
+    mo = Multiobjective_model(parameters, df = data) 
     df = mo.solve_multi_objective()
     print(df)

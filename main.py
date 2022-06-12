@@ -1,13 +1,27 @@
 from generate_graph import Graph
 from solve_baseline import Model_Baseline, Multiobjective_model
-
+from pymoo.core.problem import starmap_parallelized_eval
+from parameters import Parameters
+from heuristic import Multiobjective_heuristic, Minimize
+import multiprocessing as mp
+    
+# The code below is solving the multiobjective problem using the heuristic and the model.
 if __name__ == '__main__':
-    set_seed = 1234567890
+    pool = mp.pool.ThreadPool()
+    set_seed = 0
     plot_graph = True
-    verbose = False
-    # Increasing num_of_collection_centers takes alot more time.
+    verbose = True
+    nsga3 = True
+   # Increasing num_of_collection_centers takes alot more time.
     num_of_collection_centers = 4
-    RandomGraph = Graph(num_of_collection_centers,baseline=True,plot_graph=plot_graph, seed=set_seed, baseline_scaler=10)
+    RandomGraph = Graph(num_of_collection_centers,baseline=True,plot_graph=plot_graph, seed=set_seed, baseline_scaler=3)
+    parameters = Parameters(RandomGraph, set_seed)
+    three_objective_problem = Multiobjective_heuristic(parameters, runner=pool.starmap, func_eval = starmap_parallelized_eval)
+    minimization = Minimize(problem = three_objective_problem, population_size = 1000, number_of_generations = 120, verbose = verbose, nsga3 = nsga3)
+    result = minimization.minimize_heuristic()
+    print('Time for 3 objective execution Threads:', result.exec_time)
+    print(result.F, result.X)
+    pool.close()
     model_baseline = Model_Baseline(RandomGraph, plot_graph=plot_graph, seed=set_seed, verbose=verbose)
     list_of_functions = [model_baseline.minimize_cost, model_baseline.minimize_land_usage,model_baseline.minimize_health_impact]
     data = model_baseline.solve_model(list_of_functions)

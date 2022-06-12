@@ -12,9 +12,10 @@ IntFloat = TypeVar("IntFloat", int, float)
 
 class Graph():
     """
-    Class Graph. This class creates a randomised networkx graph.
+    The Graph class is a container for a set of vertices and a set of edges..
     """
     def __init__(self, 
+        
                 number_of_cities: int, 
                 number_list: List[int] = [0,0,0], 
                 baseline: bool = False, 
@@ -26,13 +27,21 @@ class Graph():
         (dict), supplies (dict), demands (dict), custom_parameters (dict),
         city_population (dict), and city_sizes (dict)
 
-        :param number_of_cities: The number of cities to create.
-        :param number_list: [Num. of demand cities, Num. of incinerator cities, Num. of recycling cities]. 
-        :param baseline: Use the baseline (Optional): Olapiriyakul, Sun & Pannakkong, Warut & Kachapanya, Warith & Starita, Stefano. (2019). 
-        :param plot_graph: To plot the graph when creating a new graph (Optional). 
-        :type number_of_cities: int 
-        :type number_list:
-        list :return:
+        :param number_of_cities: The number of cities to create
+        :type number_of_cities: int
+        :param number_list: [Num. of demand cities, Num. of incinerator cities, Num. of recycling
+        cities]
+        :type number_list: List[int]
+        :param baseline: Use the baseline (Optional): Olapiriyakul, Sun & Pannakkong, Warut &
+        Kachapanya, Warith & Starita, Stefano. (2019), defaults to False
+        :type baseline: bool (optional)
+        :param plot_graph: To plot the graph when creating a new graph (Optional), defaults to False
+        :type plot_graph: bool (optional)
+        :param seed: The seed for the random number generator, defaults to 1
+        :type seed: IntFloat (optional)
+        :param baseline_scaler: This is the scaler for the baseline. The baseline is a graph that is
+        created by the paper. The scaler is used to scale the graph, defaults to 3
+        :type baseline_scaler: int (optional)
         """
         super().__init__()
         assert all(x <= number_of_cities and x >= 0 for x in number_list), (f"All numbers in the number list must be less than or equal to the number of cities: {number_of_cities} and greater than or equal to zero. Got {number_list}.")
@@ -69,20 +78,22 @@ class Graph():
         """
         Add a custom parameter to the dictionary self.custom_parameters.
 
-        :param name: Name of the dictionary entry.
-        :param size: Size of the value of the entry to be created.
-        :param low: For random number generation, the low parameter. (Optional).
-        :param high: For random number generation, the high parameter. (Optional).
-        :param random: If random number generation should be used. (Optional). 
-        :param integer: If the random number generation should use Integers or Floats. (Optional). 
-        :param fixed_number: The fixed number/numbers that should be used in the parameter. (Optional). 
-        :type name: str, int
-        :type size: int, tuple
-        :type low: int
+        :param name: Name of the dictionary entry
+        :type name: StrInt
+        :param size: The size of the parameter, defaults to 1
+        :type size: TupleInt (optional)
+        :param low: The lower bound of the random number generation, defaults to 10
+        :type low: int (optional)
+        :param high: The highest value that the random number can be
         :type high: int
-        :type random: bool
-        :type integer: bool
-        :type fixed_number: int, list
+        :param random: If random number generation should be used. (Optional), defaults to False
+        :type random: bool (optional)
+        :param integer: If the random number generation should use Integers or Floats. (Optional),
+        defaults to False
+        :type integer: bool (optional)
+        :param fixed_number: The fixed number/numbers that should be used in the parameter. (Optional),
+        defaults to 0
+        :type fixed_number: ListInt (optional)
         :return: The custom parameter which is added to the dictionary.
         """
 
@@ -322,6 +333,11 @@ class Graph():
             else: numbers = [np.random.randint(low=low, high=high) for _ in range(n)]
             return numbers
         def _generate_city_sizes() -> dict:
+            """
+            The function takes the population of each city and divides it by the density of the city
+            to get the area of the city
+            :return: A dictionary of city names and their respective sizes.
+            """
             DENSITY = 4800 # Population/KM^2
             #pop/density = Area
             _city_sizes = dict()
@@ -333,9 +349,9 @@ class Graph():
 
         def _generate_city_population() -> dict:
             """
-            Generates random population of cities based on the attributes that they have.
-            :return: populations
-            :rtype: dict
+            The function generates a dictionary of city populations based on the number of nodes in
+            the graph, the number of nodes in the special locations, and a random number generator
+            :return: A dictionary of the city names and their populations.
             """
             POPULATION_SCALE = 45000
             HIGH_FIXED = 80000
