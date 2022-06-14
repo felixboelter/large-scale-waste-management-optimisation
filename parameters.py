@@ -43,7 +43,7 @@ class Parameters():
         self.opening_costs : np.ndarray = self._create_opening_costs()
         self.link_populations : Dict[tuple, int] = self._create_population_near_links()
         self.link_populations_list : Tuple[np.ndarray, np.ndarray, np.ndarray] = self._population_near_links_tolist(self.link_populations)
-        self.population_near_facilities : Dict[tuple, np.float64] = self._create_population_near_facilities()
+        self.population_near_facilities : Dict[tuple, np.ndarray] = self._create_population_near_facilities()
         self.population_list : Tuple[np.ndarray, np.ndarray, np.ndarray] = self._population_near_facilities_list(self.population_near_facilities)
         self.link_dalys : Dict[tuple, float] = self._create_DALY_for_links()
         self.link_dalys_list : Tuple[np.ndarray, np.ndarray, np.ndarray] = self.DALY_for_links_tolist(self.link_dalys)
@@ -159,12 +159,12 @@ class Parameters():
         _landfill_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._sorting_facilities and key[1] in self._landfill_facilities) or (key[0] in self._landfill_facilities and key[1] in self._sorting_facilities)])
         return _sorting_link_population, _incinerator_link_population, _landfill_link_population
     
-    def _create_population_near_facilities(self) -> Dict[tuple, np.float64]:
+    def _create_population_near_facilities(self) -> Dict[tuple, np.ndarray]:
         """
         Helper function. Creates population for all nodes in graph G. 
         Based on the population at node i and the amount of space the facility is using up in km^2.
         :return: Subpopulation for all nodes in graph G.
-        :rtype: Dictionary[(i,j), np.float64]
+        :rtype: Dictionary[(i,j), np.ndarray]
         """
         people_living_near_facility = dict()
         m_sqr_to_km_sqr = lambda m_sqr: m_sqr / 1e6
@@ -172,7 +172,7 @@ class Parameters():
         self._G.custom_parameters['people_living_near_facility'] = people_living_near_facility
         return people_living_near_facility
     
-    def _population_near_facilities_list(self, population_dict: Dict[tuple, np.float64]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _population_near_facilities_list(self, population_dict: Dict[tuple, np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Helper function. Creates three lists from the population dictionary, used for the metaheuristic.
         :param population_dict: dictionary created using the function _create_population_near_facilities().
@@ -182,3 +182,11 @@ class Parameters():
         _incinerator_population = np.array([val[1] for key, val in population_dict.items() if key in self._incinerator_facilities])
         _landfill_population = np.array([val[2] for key, val in population_dict.items() if key in self._landfill_facilities])
         return _sorting_population, _incinerator_population, _landfill_population
+if __name__ == '__main__':
+    from generate_graph import Graph
+    num_of_collection_centers = 5
+    set_seed = 1
+    verbose = True 
+    nsga3 = False
+    RandomGraph = Graph(num_of_collection_centers,baseline=True,plot_graph=False, seed=set_seed, baseline_scaler=3)
+    parameters = Parameters(RandomGraph, set_seed)
