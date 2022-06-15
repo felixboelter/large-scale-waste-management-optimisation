@@ -47,9 +47,6 @@ class Vectorized_heuristic(Problem):
         :param out: the output dictionary
         """
         # Objective 1
-        _sorting_x = x[:,self.binary_sorting_slice]
-        _incinerator_x = x[:,self.binary_incinerator_slice]
-        _landfill_x = x[:,self.binary_landfill_slice]
         _facility_lengths = [len(self._parameters._sorting_facilities), len(self._parameters._incinerator_facilities), len(self._parameters._landfill_facilities)]
         _opening_costs = [np.hstack((self._parameters.opening_costs[i],) * l) for i,l in enumerate(_facility_lengths)]
 
@@ -88,7 +85,6 @@ class Vectorized_heuristic(Problem):
         _num_incinerator_facilities = len(self._parameters._incinerator_facilities)
         _num_landfill_facilities = len(self._parameters._landfill_facilities)
         constraint_1 = np.abs(np.sum(x[:,self.continuous_ij_slice].reshape(-1,_num_sorting_facilities,_num_collection_facilities),axis=1) - self.supplies)
-        # print(x[:,self.continuous_ij_slice].reshape(-1,_num_sorting_facilities,_num_collection_facilities).shape)
         _ij_x_sum_for_j = np.sum(x[:,self.continuous_ij_slice].reshape(-1,_num_sorting_facilities,_num_collection_facilities), axis = 2)
         _jk_x_sum_for_j = np.sum(x[:,self.continuous_jk_slice].reshape(-1,_num_sorting_facilities,_num_incinerator_facilities), axis = 2)
         _jkp_x_sum_for_j = np.sum(x[:,self.continuous_jkp_slice].reshape(-1,_num_sorting_facilities, _num_landfill_facilities), axis = 2)
