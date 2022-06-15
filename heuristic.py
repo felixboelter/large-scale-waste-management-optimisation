@@ -1,6 +1,7 @@
 from typing import TypeVar, Dict,List, Any, Union, Tuple, Optional
 import numpy as np
 from parameters import Parameters
+import pymoo
 from pymoo.factory import get_sampling, get_crossover, get_mutation, get_termination, get_reference_directions
 from pymoo.operators.mixed_variable_operator import MixedVariableSampling, MixedVariableMutation, MixedVariableCrossover
 from pymoo.algorithms.moo.nsga2 import NSGA2
@@ -33,7 +34,7 @@ class Vectorized_heuristic(Problem):
         xu_int = np.ones(self.num_integer_vars) * self._parameters._G._number_of_cities
         xu_cont = np.ones(self.num_continuous_vars) * np.sum(self.supplies)
         super().__init__(n_var = self.num_binary_vars + self.num_integer_vars + self.num_continuous_vars,
-                                    n_obj = 2,
+                                    n_obj = 3,
                                     n_constr = _n_constr,
                                     xl=0,
                                     xu=np.concatenate([xu_bin,xu_int,xu_cont]),
@@ -303,7 +304,7 @@ class Minimize():
     def __init__(self, 
                 problem : Elementwise_heuristic, 
                 population_size : int, 
-                number_of_generations : int, 
+                termination : pymoo.util.termination, 
                 verbose = True, 
                 nsga3 = True):
         """
@@ -324,7 +325,7 @@ class Minimize():
         """
         self._problem = problem
         self._pop_size = population_size
-        self._num_gen = number_of_generations
+        self._termination = termination
         self._verbose = verbose
         self._nsga3 = nsga3
         self.sampling, self.crossover, self.mutation = self._create_mixed_variables()
@@ -349,10 +350,9 @@ class Minimize():
                     mutation=self.mutation,
                     eliminate_duplicates=True)
         self._problem = ConstraintsAsPenalty(self._problem, penalty=1e6)
-        
         res = minimize(self._problem,
             algorithm,
-            ('n_gen', self._num_gen),
+            self._termination,
             seed=1,
             verbose=self._verbose,
             save_history= False)

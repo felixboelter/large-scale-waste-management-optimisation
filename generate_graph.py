@@ -220,7 +220,7 @@ class Graph():
                         ),
                         annotations=[ dict(
                                 text=f" <b>Total Demand:</b> {sum(self.demands.values())}" + \
-                                    f"<br> <b>Total Unsorted Supply:</b> {sum([us for us,_  in self.supplies.values()])}" + \
+                                    f"<br> <b>Total Unsorted Supply:</b> {np.round(sum([us for us,_  in self.supplies.values()]), 3)}" + \
                                     f"<br> <b>Total Sorted Supply:</b> {sum([s for _, s in self.supplies.values()])} ",
                                 showarrow=False,
                                 align = 'left',
@@ -329,9 +329,9 @@ class Graph():
             :return numbers: The number/numbers generated.
             :rtype: int/list
             """
-            if n == 1: numbers = np.random.randint(low=low, high=high)
-            else: numbers = [np.random.randint(low=low, high=high) for _ in range(n)]
-            return numbers
+            if n == 1: numbers = np.random.random_sample() * (high - low) + low
+            else: numbers = [ np.random.random_sample() * (high - low) + low for _ in range(n)]
+            return np.round(numbers, 3)
         def _generate_city_sizes() -> dict:
             """
             The function takes the population of each city and divides it by the density of the city
@@ -380,7 +380,7 @@ class Graph():
         for i in range(len(self._locations)):
             for j in range(len(self._locations)):
                 # Eucledian distance calculation.
-                distance = np.round(((self._locations[i][0] - self._locations[j][0])**2 + (self._locations[i][1] - self._locations[j][1])**2)**0.5)
+                distance = ((self._locations[i][0] - self._locations[j][0])**2 + (self._locations[i][1] - self._locations[j][1])**2)**0.5
                 # Add the edge to a graph with the distance as an edge weight.
                 _add_edge_to_graph(self.G, self._locations[i], self._locations[j], distance)
         # Generate the supply amount for each node.

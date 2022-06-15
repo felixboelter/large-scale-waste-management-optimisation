@@ -21,9 +21,19 @@ class Model_Baseline():
     """
     def __init__(self, parameters : Parameters, plot_graph : Optional[bool] = False,verbose : Optional[bool] = False) -> None:
         """
-        Model_Baseline constructor. Public access to solved_model : docplex.mp.solution.SolveSolution | None
-        :param G: Graph object from generate_graph.py
-        :param seed: The seed to generate random numbers from.
+        The function takes in a graph object, a seed, and a boolean value for whether or not to plot the
+        graph. It then creates a model object, and creates a list of edges for each type of facility. It
+        then creates the decision variables, and creates a tuple for each type of facility. It then
+        creates the constraints
+        
+        :param parameters: Parameters
+        :type parameters: Parameters
+        :param plot_graph: If True, the graph will be plotted after the model is solved, defaults to
+        False
+        :type plot_graph: Optional[bool] (optional)
+        :param verbose: If True, prints out the model's constraints and objective function, defaults to
+        False
+        :type verbose: Optional[bool] (optional)
         """
         self._parameters = parameters
         self.model = Model(name="Baseline")
@@ -342,6 +352,7 @@ class Model_Baseline():
         """
         if not isinstance(list_of_functions, list): list_of_functions = [list_of_functions]
         df = pd.DataFrame(columns=["Objective Name","Cost Objective", "Land Usage Objective", "Health Impact Objective"])
+        model_df = pd.DataFrame()
         _figs = []
         log = False
         if self._verbose: log=True
@@ -354,13 +365,15 @@ class Model_Baseline():
             self.solved_model = self.model.solve(clean_before_solve=True, log_output = log)
             toc = time.perf_counter()
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
+            time_spent = toc - tic
             if self._verbose:
-                print(f"Elapsed time for {self.minimization} was {toc - tic:0.4f} seconds")
+                print(f"Elapsed time for {self.minimization} was {time_spent:0.4f} seconds")
                 self.solved_model.display()
                 self.model.export_as_lp("./")
             self.model.remove_objective()
             self.solved_graph = nx.DiGraph()
-            df_solved_model = self.solved_model.as_df()
+            df_solved_model = self.solved_model.as_df(name_key = self.minimization)
+            model_df = pd.concat([model_df,df_solved_model], axis=1)
             self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values if round(value) > 0]
             self._data_locations = [key for key, _ in self.df_solved_model_list]
             # Get the distance for all cities between all cities as our cost edges.
@@ -392,7 +405,7 @@ class Model_Baseline():
                     _total_fig.add_trace(item, row = row_num, col = col_num)
                 col_num +=1
             _total_fig.show()
-        return df
+        return model_df, df
     
     def _calculate_cost(self, y_decisions : List[Tuple[Any, int]], x_decisions : Dict[tuple, Any]) -> Tuple[float, float]:
         """
