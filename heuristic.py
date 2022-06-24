@@ -1,15 +1,18 @@
 from typing import TypeVar, Dict,List, Any, Union, Tuple, Optional
 import numpy as np
 from parameters import Parameters
+import networkx as nx
 import pymoo
 from pymoo.factory import get_sampling, get_crossover, get_mutation, get_termination, get_reference_directions
 from pymoo.operators.mixed_variable_operator import MixedVariableSampling, MixedVariableMutation, MixedVariableCrossover
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.algorithms.moo.nsga3 import NSGA3
+from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.factory import get_visualization, get_reference_directions
 from pymoo.optimize import minimize
 from pymoo.core.problem import ElementwiseProblem, Problem
 from pymoo.problems.constr_as_penalty import ConstraintsAsPenalty
+from pymoo.core.repair import Repair
 
 
 class Vectorized_heuristic(Problem):
@@ -39,7 +42,7 @@ class Vectorized_heuristic(Problem):
                                     xl=0,
                                     xu=np.concatenate([xu_bin,xu_int,xu_cont]),
                                     **kwargs)
-    def _evaluate(self, x, out, *args, **kwargs):
+    def _evaluate(self, x, out, t = None, *args, **kwargs):
         """
         The function takes in the decision variables, and returns the objective function values and the
         constraint violation
@@ -67,7 +70,6 @@ class Vectorized_heuristic(Problem):
         objective_2 = _sorting_land_usage + _incinerator_land_usage + _landfill_land_usage
 
         #Objective 3
-        # _population_list = [np.hstack((self._parameters.population_list[i],) * l) for i,l in enumerate(_facility_lengths)]
         _facility_daly_matrix = [np.hstack((self._parameters.facility_daly_matrix[i],) * l) for i,l in enumerate(_facility_lengths)]
         _sorting_health_impact = np.sum(x[:,self.binary_sorting_slice] * self._parameters.population_list[0].reshape(-1) * _facility_daly_matrix[0], axis = 1)
         _incinerator_health_impact = np.sum(x[:,self.binary_incinerator_slice] * self._parameters.population_list[1].reshape(-1) * _facility_daly_matrix[1], axis = 1)
@@ -108,7 +110,8 @@ class Vectorized_heuristic(Problem):
         constraint_12 = np.sum(_y_landfill_for_kp, axis=2) - 1
         out["F"] = np.column_stack([objective_1, objective_2, objective_3])
         out["G"] = np.column_stack([constraint_1, constraint_2, constraint_3, constraint_4,constraint_5,constraint_6, constraint_7, constraint_8, constraint_9, constraint_10, constraint_11, constraint_12])
-    
+        if t != None:
+            print(out["G"])
     def _create_variables(self):
         """
         The function creates a list of the weights of the edges between the collection locations and the
@@ -288,7 +291,188 @@ class Elementwise_heuristic(ElementwiseProblem):
         return num_binary_vars,num_integer_vars,num_continuous_vars
     
     
+class RepairFunction(Repair):
+    def _set_additional_zero(self, Z : np.ndarray, problem : Union[ElementwiseProblem, Problem], indices : Tuple[np.ndarray, np.ndarray]):
+        """
+        It takes a matrix of solutions, and sets the values of the matrix to zero at the indices
+        specified by the tuple
+        
+        :param Z: the decision variables
+        :type Z: np.ndarray
+        :param problem: the problem object
+        :type problem: Union[ElementwiseProblem, Problem]
+        :param indices: a tuple of two arrays, the first one is the row indices, the second one is the
+        column indices
+        :type indices: Tuple[np.ndarray, np.ndarray]
+        """
+        _jk_x_for_k = Z[:,problem.integer_jk_slice].reshape(Z.shape[0], -1, Z[:,problem.binary_incinerator_slice].shape[1]//3)
+        _jkp_x_for_kp = Z[:,problem.integer_jkp_slice].reshape(Z.shape[0], -1, Z[:,problem.binary_landfill_slice].shape[1]//3)
+        _jk_f_for_k = Z[:,problem.continuous_jk_slice].reshape(Z.shape[0], -1, Z[:,problem.binary_incinerator_slice].shape[1]//3)
+        _jkp_f_for_kp = Z[:,problem.continuous_jkp_slice].reshape(Z.shape[0], -1, Z[:,problem.binary_landfill_slice].shape[1]//3)
+        _jk_x_for_k[indices[0],:,indices[1]] = 0
+        _jkp_x_for_kp[indices[0],:,indices[1]] = 0
+        _jk_f_for_k[indices[0],:,indices[1]] = 0
+        _jkp_f_for_kp[indices[0],:,indices[1]] = 0
+    def _set_to_zero(self, Z : np.ndarray, y_slice : slice, x_link_slice : slice, f_link_slice : slice, problem : Union[ElementwiseProblem, Problem] = None):
+        """
+        > If the sum of the elements in the third dimension of the array is zero, then set the
+        corresponding elements in the first two dimensions to zero
+        
+        :param Z: the decision variable matrix
+        :type Z: np.ndarray
+        :param y_slice: the slice of the Z vector that corresponds to the y variables
+        :type y_slice: slice
+        :param x_link_slice: the slice of the decision vector that corresponds to the x_ij values
+        :type x_link_slice: slice
+        :param f_link_slice: the slice of the decision vector that corresponds to the f_ij variables
+        :type f_link_slice: slice
+        :param problem: the problem we're solving
+        :type problem: Union[ElementwiseProblem, Problem]
+        :return: The return value is the Z matrix.
+        """
+        _y_sorting_for_j = Z[:,y_slice].reshape(Z.shape[0],-1,3)
+        _ij_x_for_j = Z[:,x_link_slice].reshape(Z.shape[0], -1, Z[:,y_slice].shape[1]//3)
+        _ij_f_for_j = Z[:,f_link_slice].reshape(Z.shape[0], -1, Z[:,y_slice].shape[1]//3)
+        _indices_y_zero = np.where(np.sum(_y_sorting_for_j, axis=2) == 0)
+        _indices_x_zero = np.where(_ij_x_for_j == 0)
+        _indices_f_low = np.where(_ij_f_for_j < 0.5)
+        if len(_indices_y_zero[0]) > 0 and Z[:,x_link_slice].shape[1] > 1:
+            _ij_x_for_j[_indices_y_zero[0],:,_indices_y_zero[1]] = 0
+            _ij_f_for_j[_indices_y_zero[0],:,_indices_y_zero[1]] = 0
+            if problem != None: self._set_additional_zero(Z, problem, _indices_y_zero)
+        if len(_indices_x_zero[0]) > 0 and Z[:,x_link_slice].shape[1] > 1:
+            _ij_f_for_j[_indices_x_zero] = 0
+        if len(_indices_f_low[0]) > 0 and Z[:,x_link_slice].shape[1] > 1:
+            _ij_x_for_j[_indices_f_low] = 0
+            _ij_f_for_j[_indices_f_low] = 0
+        return Z
+    def _repair_supply(self, Z : np.ndarray, y_slice : slice, f_link_slice : slice, supplies : np.ndarray, facility_sizes : np.ndarray):
+        """
+        For each population, we construct a network flow graph with a source node, a sink node, and a
+        node for each facility. We then find the maximum flow from the source to the sink, and use the
+        flow values to update the facility-population link variables
+        
+        :param Z: the current solution
+        :type Z: np.ndarray
+        :param y_slice: the slice of the Z matrix that corresponds to the y variables
+        :type y_slice: slice
+        :param f_link_slice: This is the slice of the Z matrix that corresponds to the facility links
+        :type f_link_slice: slice
+        :param supplies: the supply of each facility
+        :type supplies: np.ndarray
+        :param facility_sizes: the size of each facility
+        :type facility_sizes: np.ndarray
+        :return: The Z matrix with the repaired supply.
+        """
+        _y_sorting_for_j = Z[:,y_slice].reshape(Z.shape[0],-1,3)
+        _ij_f_for_j = Z[:,f_link_slice].reshape(Z.shape[0], -1, Z[:,y_slice].shape[1]//3)
+        y_ix = np.where(_y_sorting_for_j == 1)
+        facility_sizes_for_y = _y_sorting_for_j*facility_sizes
+        for pop in range(_ij_f_for_j.shape[0]):
+            G = nx.DiGraph()
+            lookup = np.where(y_ix[0] == pop)
+            for i in range(0,len(supplies)):
+                G.add_edge("s",i,capacity=supplies[i])
+                for j,cap in enumerate(facility_sizes_for_y[y_ix][lookup]):
+                    G.add_edge(i,j+len(supplies),capacity=supplies[i])
+                    G.add_edge(j+len(supplies),"e", capacity=cap)
+            _, flow_dict = nx.maximum_flow(G, "s", "e")
+            facility_positions = y_ix[1][lookup]
+            for i in range(len(supplies)):
+                for ix, j in enumerate(flow_dict[i].values()):
+                    _ij_f_for_j[pop,i,facility_positions[ix]] = j
+        return Z
+    def _repair_placements(self, Z : np.ndarray, y_slice : slice, facility_sizes : np.ndarray, supplies : np.ndarray):
+        """
+        If the sum of the facility sizes for a given customer is less than the supply, then add the
+        smallest facility size that will make the sum equal to the supply
+        
+        :param Z: the solution matrix
+        :type Z: np.ndarray
+        :param y_slice: the slice of the Z matrix that corresponds to the y variables
+        :type y_slice: slice
+        :param facility_sizes: the sizes of the facilities
+        :type facility_sizes: np.ndarray
+        :param supplies: the amount of supplies that each facility can handle
+        :type supplies: np.ndarray
+        :return: the Z matrix with the repaired sorting placements.
+        """
+        
+        y = Z[:,y_slice].reshape(Z.shape[0],-1,3)
+        ix = np.where(np.sum(y,axis=2) > 1)
+        y[ix] = 0 
+        facility_sizes_for_y = y*facility_sizes
+        smaller_than_sum = np.where(np.sum(np.sum(facility_sizes_for_y,axis=1),axis=1) < np.sum(supplies))
+        while len(smaller_than_sum[0]) > 0:
+            difference = np.ravel(np.sum(supplies) - np.sum(np.sum(facility_sizes_for_y[smaller_than_sum,:,:],axis=2),axis=2))
+            for i,diff in enumerate(difference):
+                if diff <= facility_sizes[0]:
+                    x = np.sum(y[smaller_than_sum[0][i],:,:],axis=1).tolist().index(0)
+                    y[smaller_than_sum[0][i],:,:][x,0] = 1
+                elif diff <= facility_sizes[1]:
+                    x = np.sum(y[smaller_than_sum[0][i],:,:],axis=1).tolist().index(0)
+                    y[smaller_than_sum[0][i],:,:][x,1] = 1
+                else:
+                    x = np.sum(y[smaller_than_sum[0][i],:,:],axis=1).tolist().index(0)
+                    y[smaller_than_sum[0][i],:,:][x,2] = 1
+            facility_sizes_for_y = y*facility_sizes
+            smaller_than_sum = np.where(np.sum(np.sum(facility_sizes_for_y,axis=1),axis=1) < np.sum(supplies))
+            difference = np.ravel(np.sum(supplies) - np.sum(np.sum(facility_sizes_for_y[smaller_than_sum,:,:],axis=2),axis=2))
+        return Z
+    def _check_modify(self, Z : np.ndarray, y_slice : slice, facility_sizes : np.ndarray, supplies : np.ndarray):
+        """
+        If the sum of the facility sizes for a given y is less than the sum of the supplies, then we
+        need to modify y.
+        
+        :param Z: the solution matrix
+        :type Z: np.ndarray
+        :param y_slice: the slice of the Z matrix that corresponds to the y variables
+        :type y_slice: slice
+        :param facility_sizes: the number of units of each facility type
+        :type facility_sizes: np.ndarray
+        :param supplies: the number of people that need to be assigned to a facility
+        :type supplies: np.ndarray
+        """
+        y = Z[:,y_slice].reshape(Z.shape[0],-1,3)
+        ix = np.where(np.sum(y,axis=2) > 1)
+        y[ix] = 0 
+        facility_sizes_for_y = y*facility_sizes
+        _modify = np.where(np.sum(np.sum(facility_sizes_for_y,axis=1),axis=1) < np.sum(supplies))
+        if len(_modify[0]) > 0:
+            return True, _modify
+        else:
+            return False, None
 
+    def _do(self, problem : Union[ElementwiseProblem, Problem], pop : np.ndarray, **kwargs):
+        """
+        It checks if the sorting facilities have the least number of supply, if they don't, it repairs the solution by setting the
+        sorting facilitiy placements that are bigger than one to zero and then repairs the supply.
+        
+        :param problem: The problem object
+        :type problem: Union[ElementwiseProblem, Problem]
+        :param pop: the population of solutions
+        :type pop: np.ndarray
+        :return: The modified population.
+        """
+        
+        Z = pop.get("X")
+        _sorting_input = [problem.binary_sorting_slice, problem._parameters.facility_storage_capacities[0], problem.supplies]
+        _incinerator_input = [problem.binary_incinerator_slice, problem._parameters.facility_storage_capacities[1], problem.supplies]
+        _landfill_input = [problem.binary_landfill_slice, problem._parameters.facility_storage_capacities[2], problem.supplies]
+        _bool, _modify = self._check_modify(Z, problem.binary_sorting_slice, problem._parameters.facility_storage_capacities[0], problem.supplies)
+        if _bool:
+            _z_modify = Z[_modify]
+            for inputs in [_sorting_input, _incinerator_input, _landfill_input]:
+                _z_modify = self._repair_placements(_z_modify, *inputs)
+            _z_modify = self._repair_supply(_z_modify, problem.binary_sorting_slice, problem.continuous_ij_slice, problem.supplies, problem._parameters.facility_storage_capacities[0])
+            _z_modify = self._set_to_zero(_z_modify, problem.binary_sorting_slice, problem.integer_ij_slice, problem.continuous_ij_slice, problem = problem)
+            # _z_modify = self._set_to_zero(_z_modify, problem.binary_incinerator_slice, problem.integer_jk_slice, problem.continuous_jk_slice)
+            # _z_modify = self._set_to_zero(_z_modify, problem.binary_landfill_slice, problem.integer_jkp_slice, problem.continuous_jkp_slice)
+            Z[_modify] = _z_modify
+        pop.set("X", Z)
+        return pop
+
+        
 
 class Minimize():
     """
@@ -344,6 +528,7 @@ class Minimize():
                     sampling=self.sampling,
                     crossover=self.crossover,
                     mutation=self.mutation,
+                    repair = RepairFunction(),
                     eliminate_duplicates=True)
         self._problem = ConstraintsAsPenalty(self._problem, penalty=1e6)
         res = minimize(self._problem,
@@ -374,9 +559,9 @@ class Minimize():
         })
 
         _crossover = MixedVariableCrossover(_masks, {
-            "bin": get_crossover("bin_hux", prob=0.4),
-            "int": get_crossover("int_sbx", prob=0.4),
-            "real": get_crossover("real_sbx", prob=0.4)
+            "bin": get_crossover("bin_hux", prob=0.01),
+            "int": get_crossover("int_two_point", prob=0.2),
+            "real": get_crossover("real_two_point", prob=0.2)
         })
 
         _mutation = MixedVariableMutation(_masks, {
@@ -387,14 +572,21 @@ class Minimize():
         return _sampling, _crossover, _mutation
 if __name__ == "__main__":
     from generate_graph import Graph
-    num_of_collection_centers = 5
+    from pymoo.util.termination.f_tol import MultiObjectiveSpaceToleranceTermination
+    from pymoo.factory import get_termination
+    termination = MultiObjectiveSpaceToleranceTermination(tol=1,
+                                                        n_last=25,
+                                                        nth_gen=5,
+                                                        n_max_gen=2000,
+                                                        n_max_evals=None)
+    num_of_collection_centers = 2
     set_seed = 1
     verbose = True 
     nsga3 = False
     RandomGraph = Graph(num_of_collection_centers,baseline=True,plot_graph=True, seed=set_seed, baseline_scaler=3)
     parameters = Parameters(RandomGraph, set_seed)
     three_objective_problem = Vectorized_heuristic(parameters)
-    minimization = Minimize(problem = three_objective_problem, population_size = 1000, number_of_generations = 400, verbose = verbose, nsga3 = nsga3)
+    minimization = Minimize(problem = three_objective_problem, population_size = 5, termination = termination, verbose = verbose, nsga3 = nsga3)
     result = minimization.minimize_heuristic()
     print(result.F, result.X)
     three_objective_problem = Elementwise_heuristic(parameters)

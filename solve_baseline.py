@@ -37,6 +37,7 @@ class Model_Baseline():
         """
         self._parameters = parameters
         self.model = Model(name="Baseline")
+        self.model.parameters.mip.tolerances.mipgap = 0.000
         self._verbose = verbose
         self._plot_graph = plot_graph
         self._ij_list = [(i,j,w['weight']) for i, j, w in self._parameters._G.G.edges(data=True) if i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities]
@@ -660,7 +661,7 @@ class Multiobjective_model(Model_Baseline):
         """
         super().__init__(parameters)
         assert len(df) > 1, f"Must be atleast two functions being compared for a multiobjective optimization. Got {len(df)}"
-        self.model.parameters.mip.tolerances.mipgap = 0.005
+        self.model.parameters.mip.tolerances.mipgap = 0.000
         self.org_df : pd.DataFrame = df.copy()
         self.df : pd.DataFrame = df.copy()
         self.df.set_index('Objective Name', inplace=True)
