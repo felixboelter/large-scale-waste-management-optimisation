@@ -37,12 +37,11 @@ class Model_Baseline():
         """
         self._parameters = parameters
         self.model = Model(name="Baseline")
-        self.model.parameters.mip.tolerances.mipgap = 0.000
         self._verbose = verbose
         self._plot_graph = plot_graph
-        self._ij_list = [(i,j,w['weight']) for i, j, w in self._parameters._G.G.edges(data=True) if i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities]
+        self._ij_list = [(i,j,w['weight']) for i, j, w in self._parameters._G.G.edges(data=True) if (i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities)]
         self._jk_list = [(j,k,w['weight']) for j, k, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities)]
-        self._jkp_list = [(j,kp,w['weight']) for j, kp, w in self._parameters._G.G.edges(data=True) if j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities]
+        self._jkp_list = [(j,kp,w['weight']) for j, kp, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities)]
         self._S = 0
         self._I = 1
         self._L = 2
@@ -352,6 +351,7 @@ class Model_Baseline():
         :return: A dataframe with the results of the model.
         """
         if not isinstance(list_of_functions, list): list_of_functions = [list_of_functions]
+        self.model.parameters.mip.tolerances.mipgap = 0.000
         df = pd.DataFrame(columns=["Objective Name","Cost Objective", "Land Usage Objective", "Health Impact Objective"])
         model_df = pd.DataFrame()
         _figs = []
@@ -498,8 +498,8 @@ class Model_Baseline():
         :return: The dataframe is being returned.
         """
         self._ij_data = [(i,j,w['weight']) for i, j, w in self.solved_graph.edges(data=True) if i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities]
-        self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities) or (j in self._parameters._incinerator_facilities and k in self._parameters._sorting_facilities)]
-        self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities) or (j in self._parameters._landfill_facilities and kp in self._parameters._sorting_facilities)]
+        self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities)]
+        self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities)]
         _y_decisions = [(ast.literal_eval(key[1]), int(key[2])) for key, _ in self.df_solved_model_list if 'y' in key]
         _x_decisions = {(ast.literal_eval(key[1]), ast.literal_eval(key[2])): value for key, value in self.df_solved_model_list if 'x' in key}
         _cost_objective : Tuple[float, float] = self._calculate_cost(_y_decisions, _x_decisions)
@@ -661,7 +661,6 @@ class Multiobjective_model(Model_Baseline):
         """
         super().__init__(parameters)
         assert len(df) > 1, f"Must be atleast two functions being compared for a multiobjective optimization. Got {len(df)}"
-        self.model.parameters.mip.tolerances.mipgap = 0.000
         self.org_df : pd.DataFrame = df.copy()
         self.df : pd.DataFrame = df.copy()
         self.df.set_index('Objective Name', inplace=True)

@@ -367,7 +367,7 @@ class Graph():
                 _populations.update({key : round(random_number)})
             return _populations
         # TODO: create same graph locations/supplies for both baseline and new versions (ofc after finishing the baseline)
-        self.G = nx.Graph()
+        self.G = nx.DiGraph()
         # Create random points in range 0 - 100.
         pts = 100*np.random.random((self._number_of_cities*20,2))
         # Apply K-means to the random points.

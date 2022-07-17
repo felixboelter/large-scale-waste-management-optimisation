@@ -93,8 +93,8 @@ class Parameters():
         between the sorting facilities and the landfills.
         """
         _sorting_link_dalys = np.array([val[1] for key, val in link_daly.items() if key[0] in self._G.supplies.keys() and key[1] in self._sorting_facilities])
-        _incinerator_link_dalys = np.array([val[1] for key, val in link_daly.items() if key[0] in self._sorting_facilities and key[1] in self._incinerator_facilities or (key[0] in self._incinerator_facilities and key[1] in self._sorting_facilities)])
-        _landfill_link_dalys = np.array([val[1] for key, val in link_daly.items() if (key[0] in self._sorting_facilities and key[1] in self._landfill_facilities) or (key[0] in self._landfill_facilities and key[1] in self._sorting_facilities)])
+        _incinerator_link_dalys = np.array([val[1] for key, val in link_daly.items() if key[0] in self._sorting_facilities and key[1] in self._incinerator_facilities ])
+        _landfill_link_dalys = np.array([val[1] for key, val in link_daly.items() if (key[0] in self._sorting_facilities and key[1] in self._landfill_facilities) ])
         return _sorting_link_dalys, _incinerator_link_dalys, _landfill_link_dalys
 
     def _create_land_usage_stress_ratios(self) -> np.ndarray:
@@ -155,8 +155,8 @@ class Parameters():
         :return: The three lists for sorting, incinerator, and landfill link populations.
         """
         _sorting_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._G.supplies.keys() and key[1] in self._sorting_facilities)])
-        _incinerator_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._sorting_facilities and key[1] in self._incinerator_facilities) or (key[0] in self._incinerator_facilities and key[1] in self._sorting_facilities)])
-        _landfill_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._sorting_facilities and key[1] in self._landfill_facilities) or (key[0] in self._landfill_facilities and key[1] in self._sorting_facilities)])
+        _incinerator_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._sorting_facilities and key[1] in self._incinerator_facilities)])
+        _landfill_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._sorting_facilities and key[1] in self._landfill_facilities)])
         return _sorting_link_population, _incinerator_link_population, _landfill_link_population
     
     def _create_population_near_facilities(self) -> Dict[tuple, np.ndarray]:
