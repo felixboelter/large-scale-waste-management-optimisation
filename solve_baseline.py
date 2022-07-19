@@ -73,9 +73,8 @@ class Model_Baseline():
         self._x_jk = {(j,k) : self.model.integer_var(name=f'x_{j}_{k}') for j,k,_ in self._jk_list}
         self._x_jkp = {(j,kp) : self.model.integer_var(name=f'x_{j}_{kp}') for j,kp,_ in self._jkp_list}
         self._f_ij = {(i,j) : self.model.continuous_var(name=f'f_{i}_{j}') for i,j,_ in self._ij_list}
-        self._f_jk = {(j,k) : self.model.continuous_var(name=f'f_{j}_{k}') for j,k,_ in self._jk_list}
-        self._f_jkp = {(j,kp) : self.model.continuous_var(name=f'f_{j}_{kp}') for j,kp,_ in self._jkp_list}
-    
+        self._f_jk_kp = {(j,k_kp) : self.model.continuous_var(name=f'f_{j}_{k_kp}') for j,k_kp,_ in self._jk_list+self._jkp_list}
+
     def _create_constraints(self) -> None:
         """
         Private function. Creates the constraints used by the model.
@@ -166,6 +165,7 @@ class Model_Baseline():
         _ij_for_i_dict = _dictionary_array(self._ij_list)
         _jk_for_j_dict = _dictionary_array(self._jk_list)
         _jkp_for_j_dict = _dictionary_array(self._jkp_list)
+        _jk_kp_for_j_dict = _dictionary_array(self._jk_list + self._jkp_list)
         # Inverse dictionaries
         _ij_for_j_dict = _dictionary_array(self._ij_list,inverse=True)
         _jk_for_k_dict = _dictionary_array(self._jk_list,inverse=True)
@@ -177,24 +177,21 @@ class Model_Baseline():
             self.model.add_constraint(self.model.sum(self._f_ij[(key,j)] for j in val) == self._parameters._G.supplies[key][0])
         # Constraint 2: Flow balance, inflow of waste at sorting facility j is ENTIRELY forwarded to incinerator k or landfill k'
         _sum_f_ij_for_j= [self.model.sum(self._f_ij[(i,j)] for i in i_values) for j, i_values in _ij_for_j_dict.items()]
-        _sum_f_jk_for_j = [self.model.sum(self._f_jk[(j,k)] for k in k_values) for j, k_values in _jk_for_j_dict.items()]
-        _sum_f_jkp_for_j = [self.model.sum(self._f_jkp[(j,kp)] for kp in kp_values) for j, kp_values in _jkp_for_j_dict.items()] 
+        _sum_f_jk_for_j = [self.model.sum(self._f_jk_kp[(j,k)] for k in k_values) for j, k_values in _jk_kp_for_j_dict.items()]
         for ix in range(0, len(_sum_f_jk_for_j)):
             self.model.add_constraint(_sum_f_ij_for_j[ix] == _sum_f_jk_for_j[ix])
-        for ix in range(0, len(_sum_f_jkp_for_j)):
-            self.model.add_constraint(_sum_f_ij_for_j[ix] == _sum_f_jkp_for_j[ix])
         # Constraint 3: Size dependent capacity constraint for sorting facilities
         _size_dependent_capacity_constraint(self._S, self._y_sorting, _sum_f_ij_for_j, self._parameters._sorting_facilities)
         # Constraint 4: Size dependent capcity constraint for incinerator facilities
-        _sum_f_jk_for_k = [self.model.sum(self._f_jk[(j,k)] for j in j_value) for k, j_value in _jk_for_k_dict.items()] 
+        _sum_f_jk_for_k = [self.model.sum(self._f_jk_kp[(j,k)] for j in j_value) for k, j_value in _jk_for_k_dict.items()] 
         _size_dependent_capacity_constraint(self._I, self._y_incinerator, _sum_f_jk_for_k, self._parameters._incinerator_facilities)
         # Constraint 5: Size dependent capcity constraint for landfill facilities
-        _sum_f_jk_for_kp = [self.model.sum(self._f_jkp[(j,kp)]for j in j_value) for kp, j_value in _jkp_for_kp_dict.items()] 
+        _sum_f_jk_for_kp = [self.model.sum(self._f_jk_kp[(j,kp)]for j in j_value) for kp, j_value in _jkp_for_kp_dict.items()] 
         _size_dependent_capacity_constraint(self._L, self._y_landfill, _sum_f_jk_for_kp, self._parameters._landfill_facilities)
         # Constraint (6, 7, 8) : Transportation capacity limitations for ((i, j), (j, k), (j, kp))
         _ij_tuple = (self._ij_list, self._x_ij, self._f_ij)
-        _jk_tuple = (self._jk_list, self._x_jk, self._f_jk)
-        _jkp_tuple = (self._jkp_list, self._x_jkp, self._f_jkp)
+        _jk_tuple = (self._jk_list, self._x_jk, self._f_jk_kp)
+        _jkp_tuple = (self._jkp_list, self._x_jkp, self._f_jk_kp)
         for edge_list, x_decision_value, f_decision_value in [_ij_tuple, _jk_tuple, _jkp_tuple]:
             _transportation_capacity_limitations(edge_list, x_decision_value, f_decision_value)
         # Constraint (9, 10, 11): One size selection for (sorting, incinerator, landfill) facilities
@@ -367,8 +364,8 @@ class Model_Baseline():
             toc = time.perf_counter()
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
             time_spent = toc - tic
+            print(f"Elapsed time for {self.minimization} was {time_spent:0.4f} seconds")
             if self._verbose:
-                print(f"Elapsed time for {self.minimization} was {time_spent:0.4f} seconds")
                 self.solved_model.display()
                 self.model.export_as_lp("./")
             self.model.remove_objective()
@@ -744,13 +741,14 @@ class Multiobjective_model(Model_Baseline):
             tic = time.perf_counter()
             self.solved_model = self.model.solve(clean_before_solve=True,log_output=log)
             toc = time.perf_counter()
+
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
             _name = ""
             for idx, comb in enumerate(combination):
                 if idx < len(combination)-1 : _name += f"{_get_key(self.column_dict, comb)}, "
                 else: _name += f"and {_get_key(self.column_dict, comb)}"
+            print(f"Elapsed time for {_name} was {toc - tic:0.4f} seconds")
             if verbose:
-                print(f"Elapsed time for {_name} was {toc - tic:0.4f} seconds")
                 print(self.model.solve_details)
                 self.solved_model.display()
                 self.model.export_as_lp("./")
