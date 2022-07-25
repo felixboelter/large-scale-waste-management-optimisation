@@ -38,7 +38,7 @@ class Vectorized_heuristic(Problem):
         self.num_binary_vars, self.num_integer_vars, self.num_continuous_vars = self._create_variables()
         _n_obj = 3
         _n_constr = len(self.supplies) + (len(self._ij_list)//len(self.supplies) ) *2+ len(self._ij_list)* len(self._parameters.maximum_amount_transport) + len(self._jk_list)* len(self._parameters.maximum_amount_transport) + len(self._jkp_list)* len(self._parameters.maximum_amount_transport)
-        _n_constr += (len(self._parameters._sorting_facilities) + len(self._parameters._incinerator_facilities) +len(self._parameters._landfill_facilities))*2
+        _n_constr += (len(self._parameters.sorting_facilities) + len(self._parameters.incinerator_facilities) +len(self._parameters.landfill_facilities))*2
         if verbose:
             print(f"Number of Variables: {self.num_binary_vars + self.num_integer_vars + self.num_continuous_vars}")
             print(f"Binary: {self.num_binary_vars},  Integer: {self.num_integer_vars},   Continuous: {self.num_continuous_vars}")
@@ -62,7 +62,7 @@ class Vectorized_heuristic(Problem):
         :param out: the output dictionary
         """
         # Objective 1
-        _facility_lengths = [len(self._parameters._sorting_facilities), len(self._parameters._incinerator_facilities), len(self._parameters._landfill_facilities)]
+        _facility_lengths = [len(self._parameters.sorting_facilities), len(self._parameters.incinerator_facilities), len(self._parameters.landfill_facilities)]
         _opening_costs = [np.hstack((self._parameters.opening_costs[i],) * l) for i,l in enumerate(_facility_lengths)]
     
         _sorting_opening_costs = x[:,self.binary_sorting_slice] @ _opening_costs[0]
@@ -95,13 +95,16 @@ class Vectorized_heuristic(Problem):
         objective_3 = total_facility_health_impact + total_link_health_impact
         # Constraints
         _epsilon = 0
-        _num_sorting_facilities = len(self._parameters._sorting_facilities)
-        _num_collection_facilities = len(self._parameters._G.collection_locations)
-        _num_incinerator_facilities = len(self._parameters._incinerator_facilities)
-        _num_landfill_facilities = len(self._parameters._landfill_facilities)
+        _num_sorting_facilities = len(self._parameters.sorting_facilities)
+        _num_collection_facilities = len(self._parameters.G.collection_locations)
+        _num_incinerator_facilities = len(self._parameters.incinerator_facilities)
+        _num_landfill_facilities = len(self._parameters.landfill_facilities)
         constraint_1 = np.abs(np.sum(x[:,self.continuous_ij_slice].reshape(-1,_num_collection_facilities,_num_sorting_facilities),axis=2) - self.supplies) - _epsilon
         _ij_f_sum_for_j = np.sum(x[:,self.continuous_ij_slice].reshape(-1,_num_collection_facilities, _num_sorting_facilities), axis = 1)
-        _jk_kp_f_sum_for_j = np.sum(x[:,self.continuous_end_link_slice].reshape(-1,_num_sorting_facilities,_num_incinerator_facilities + _num_landfill_facilities), axis = 2)
+        _jk_f_for_j = x[:,self.continuous_jk_slice].reshape(-1, _num_sorting_facilities, _num_incinerator_facilities)
+        _jkp_f_for_j = x[:,self.continuous_jkp_slice].reshape(-1, _num_sorting_facilities, _num_landfill_facilities)
+        _jk_kp_f_sum_for_j = np.sum(np.dstack([_jk_f_for_j, _jkp_f_for_j]), axis = 2)
+        # _jk_kp_f_sum_for_j = np.sum(x[:,self.continuous_end_link_slice].reshape(-1,_num_sorting_facilities,_num_incinerator_facilities + _num_landfill_facilities), axis = 2)
         constraint_2 = np.abs(_ij_f_sum_for_j - _jk_kp_f_sum_for_j)  - _epsilon
         _y_sorting_for_j = x[:,self.binary_sorting_slice].reshape(x.shape[0],-1, len(self._parameters.facility_storage_capacities[0]))
         constraint_4 = _ij_f_sum_for_j - np.sum(_y_sorting_for_j * self._parameters.facility_storage_capacities[0], axis = 2)
@@ -112,9 +115,9 @@ class Vectorized_heuristic(Problem):
         _y_landfill_for_kp = x[:,self.binary_landfill_slice].reshape(x.shape[0],-1,len(self._parameters.facility_storage_capacities[2]))
         constraint_5 = _jk_x_sum_for_k - np.sum(_y_incinerator_for_k * self._parameters.facility_storage_capacities[1], axis = 2)
         constraint_6 = _jkp_x_sum_for_kp - np.sum(_y_landfill_for_kp * self._parameters.facility_storage_capacities[2], axis = 2)
-        constraint_7 = np.column_stack([x[:,self.continuous_ij_slice] - x[:,self.integer_ij_slice] * self._parameters.maximum_amount_transport[l] for l in range(len(self._parameters.maximum_amount_transport))])
-        constraint_8 = np.column_stack([x[:,self.continuous_jk_slice] - x[:,self.integer_jk_slice] * self._parameters.maximum_amount_transport[l] for l in range(len(self._parameters.maximum_amount_transport))])
-        constraint_9 = np.column_stack([x[:,self.continuous_jkp_slice] - x[:,self.integer_jkp_slice] * self._parameters.maximum_amount_transport[l] for l in range(len(self._parameters.maximum_amount_transport))])
+        constraint_7 = x[:,self.continuous_ij_slice] - x[:,self.integer_ij_slice] * self._parameters.maximum_amount_transport[0]
+        constraint_8 = x[:,self.continuous_jk_slice] - x[:,self.integer_jk_slice] * self._parameters.maximum_amount_transport[1]
+        constraint_9 = x[:,self.continuous_jkp_slice] - x[:,self.integer_jkp_slice] * self._parameters.maximum_amount_transport[1]
         constraint_10 = np.sum(_y_sorting_for_j, axis=2) - 1
         constraint_11 = np.sum(_y_incinerator_for_k, axis=2) - 1
         constraint_12 = np.sum(_y_landfill_for_kp, axis=2) - 1
@@ -134,16 +137,16 @@ class Vectorized_heuristic(Problem):
         :return: The number of binary, integer and continuous variables
         """
 
-        self._ij_list = [(w['weight']) for i, j, w in self._parameters._G.G.edges(data=True) if (i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities)]
-        self._jk_list = [(w['weight']) for j, k, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities)]
-        self._jkp_list = [(w['weight']) for j, kp, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities)]
+        self._ij_list = [(w['weight']) for i, j, w in self._parameters.G.G.edges(data=True) if (i in self._parameters.G.collection_locations and j in self._parameters.sorting_facilities)]
+        self._jk_list = [(w['weight']) for j, k, w in self._parameters.G.G.edges(data=True) if (j in self._parameters.sorting_facilities and k in self._parameters.incinerator_facilities)]
+        self._jkp_list = [(w['weight']) for j, kp, w in self._parameters.G.G.edges(data=True) if (j in self._parameters.sorting_facilities and kp in self._parameters.landfill_facilities)]
         
-        self.supplies = np.array(list(self._parameters._G.supplies.values()))[:,0]
+        self.supplies = np.array(list(self._parameters.G.supplies.values()))[:,0]
 
         # Multiply by 3 for 3 sizes per sorting facility
-        _sorting_length = len(self._parameters._sorting_facilities)*3
-        _incinerator_length = len(self._parameters._incinerator_facilities) *3
-        _landfill_length = len(self._parameters._landfill_facilities) * 3
+        _sorting_length = len(self._parameters.sorting_facilities)*3
+        _incinerator_length = len(self._parameters.incinerator_facilities) *3
+        _landfill_length = len(self._parameters.landfill_facilities) * 3
         
         _ij_length = len(self._ij_list)
         _jk_length = len(self._jk_list)
@@ -165,7 +168,7 @@ class Vectorized_heuristic(Problem):
         self.continuous_ij_slice = slice((num_integer_vars + num_binary_vars) , (num_integer_vars + num_binary_vars) + _ij_length, 1)
         self.continuous_jk_slice = slice((num_integer_vars + num_binary_vars) + _ij_length, (num_integer_vars + num_continuous_vars + num_binary_vars) - _jkp_length , 1)
         self.continuous_jkp_slice = slice((num_integer_vars+ num_continuous_vars + num_binary_vars) - _jkp_length, (num_integer_vars+ num_continuous_vars + num_binary_vars), 1)
-        self.continuous_end_link_slice = slice((num_integer_vars + num_binary_vars) + _ij_length, (num_integer_vars+ num_continuous_vars + num_binary_vars), 1)
+        # self.continuous_end_link_slice = slice((num_integer_vars + num_binary_vars) + _ij_length, (num_integer_vars+ num_continuous_vars + num_binary_vars), 1)
         
         return num_binary_vars,num_integer_vars,num_continuous_vars
 
@@ -181,14 +184,14 @@ class Elementwise_heuristic(ElementwiseProblem):
 
         self._parameters = parameters
         self.num_binary_vars, self.num_integer_vars, self.num_continuous_vars = self._create_variables()
-        _n_constr = len(self.supplies) + (len(self._ij_list)//len(self.supplies) ) *2 + len(self._parameters._sorting_facilities)*2 + len(self._parameters._incinerator_facilities)*2 + len(self._parameters._landfill_facilities) * 2 + len(self._ij_list)* len(self._parameters.maximum_amount_transport) + len(self._jk_list)* len(self._parameters.maximum_amount_transport) + len(self._jkp_list)* len(self._parameters.maximum_amount_transport)
+        _n_constr = len(self.supplies) + (len(self._ij_list)//len(self.supplies) ) *2 + len(self._parameters.sorting_facilities)*2 + len(self._parameters.incinerator_facilities)*2 + len(self._parameters.landfill_facilities) * 2 + len(self._ij_list)* len(self._parameters.maximum_amount_transport) + len(self._jk_list)* len(self._parameters.maximum_amount_transport) + len(self._jkp_list)* len(self._parameters.maximum_amount_transport)
 
         print(f"Number of Variables: {self.num_binary_vars + self.num_integer_vars + self.num_continuous_vars}")
         print(f"Binary: {self.num_binary_vars},  Integer: {self.num_integer_vars},   Continuous: {self.num_continuous_vars}")
 
         print(f"Number of constraints: {_n_constr}.")
         xu_bin = np.ones(self.num_binary_vars)
-        xu_int = np.ones(self.num_integer_vars) * self._parameters._G._number_of_cities
+        xu_int = np.ones(self.num_integer_vars) * self._parameters.G._number_of_cities
         xu_cont = np.ones(self.num_continuous_vars) * np.sum(self.supplies)
         super().__init__(n_var = self.num_binary_vars + self.num_integer_vars + self.num_continuous_vars,
                                     n_obj = 3,
@@ -240,7 +243,7 @@ class Elementwise_heuristic(ElementwiseProblem):
         objective_3 = total_facility_health_impact + total_link_health_impact
 
         # Constraints
-        _num_sorting_facilities = len(self._parameters._sorting_facilities)
+        _num_sorting_facilities = len(self._parameters.sorting_facilities)
         constraint_1 = np.abs(np.sum(x[self.continuous_ij_slice].reshape(-1,_num_sorting_facilities),axis=1) - self.supplies)
         _ij_x_sum_for_j = np.sum(x[self.continuous_ij_slice].reshape(-1,_num_sorting_facilities), axis = 0)
         _jk_x_sum_for_j = np.sum(x[self.continuous_jk_slice].reshape(-1,_num_sorting_facilities), axis = 0)
@@ -273,16 +276,16 @@ class Elementwise_heuristic(ElementwiseProblem):
         continuous variables.
         :return: The number of binary, integer and continuous variables
         """
-        self._ij_list = [(w['weight']) for i, j, w in self._parameters._G.G.edges(data=True) if (i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities)]
-        self._jk_list = [(w['weight']) for j, k, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities) or (j in self._parameters._incinerator_facilities and k in self._parameters._sorting_facilities)]
-        self._jkp_list = [(w['weight']) for j, kp, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities) or (j in self._parameters._landfill_facilities and kp in self._parameters._sorting_facilities)]
+        self._ij_list = [(w['weight']) for i, j, w in self._parameters.G.G.edges(data=True) if (i in self._parameters.G.collection_locations and j in self._parameters.sorting_facilities)]
+        self._jk_list = [(w['weight']) for j, k, w in self._parameters.G.G.edges(data=True) if (j in self._parameters.sorting_facilities and k in self._parameters.incinerator_facilities) or (j in self._parameters.incinerator_facilities and k in self._parameters.sorting_facilities)]
+        self._jkp_list = [(w['weight']) for j, kp, w in self._parameters.G.G.edges(data=True) if (j in self._parameters.sorting_facilities and kp in self._parameters.landfill_facilities) or (j in self._parameters.landfill_facilities and kp in self._parameters.sorting_facilities)]
         
-        self.supplies = np.array(list(self._parameters._G.supplies.values()))[:,0]
+        self.supplies = np.array(list(self._parameters.G.supplies.values()))[:,0]
 
         # Multiply by 3 for 3 sizes per sorting facility
-        _sorting_length = len(self._parameters._sorting_facilities) * 3
-        _incinerator_length = len(self._parameters._incinerator_facilities) * 3
-        _landfill_length = len(self._parameters._landfill_facilities) * 3
+        _sorting_length = len(self._parameters.sorting_facilities) * 3
+        _incinerator_length = len(self._parameters.incinerator_facilities) * 3
+        _landfill_length = len(self._parameters.landfill_facilities) * 3
         
         _ij_length = len(self._ij_list)
         _jk_length = len(self._jk_list)
@@ -369,7 +372,7 @@ class CustomMutation(Mutation):
         """
         
         edited_supplies = normalize_supplies.copy()
-        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) * 10
+        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 100
         _n_link_f_for_j = self._normalize(X, num_facilities, _link_slice, edited_supplies)
         _mutation_link_for_j = mutation_mask[:, _link_slice].reshape(mutation_mask.shape[0], -1, num_facilities)
         
@@ -409,9 +412,9 @@ class CustomMutation(Mutation):
         :param X: the population
         :return: The mutated values of the input array X.
         """
-        num_sorting = len(problem._parameters._sorting_facilities) 
-        num_incinerators = len(problem._parameters._incinerator_facilities) 
-        num_landfill = len(problem._parameters._landfill_facilities)
+        num_sorting = len(problem._parameters.sorting_facilities) 
+        num_incinerators = len(problem._parameters.incinerator_facilities) 
+        num_landfill = len(problem._parameters.landfill_facilities)
         _ij_slice = slice(0,len(problem._ij_list))
         _jk_kp_slice = slice(len(problem._ij_list), X.shape[1])
 
@@ -504,7 +507,7 @@ class CustomCrossover(Crossover):
         # Reshape for j
         _link_f_for_j = X[:,:,link_slice].reshape(X.shape[0], X.shape[1], -1, num_facilities)
         edited_supplies = normalize_supplies.copy()
-        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) * 10
+        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 1e6
         _n_link_f_for_j = normalize(_link_f_for_j, edited_supplies)
         _M_ij_3d = mask.reshape(mask.shape[0], -1, num_facilities)
         # Apply the masks for the originals and crossover candidates
@@ -587,12 +590,12 @@ class CustomCrossover(Crossover):
 
          # get the X of parents and count the matings
         _, n_matings, n_var = X.shape
-        num_sorting = len(problem._parameters._sorting_facilities) 
-        num_incinerators = len(problem._parameters._incinerator_facilities) 
-        num_landfill = len(problem._parameters._landfill_facilities)
+        num_sorting = len(problem._parameters.sorting_facilities) 
+        num_incinerators = len(problem._parameters.incinerator_facilities) 
+        num_landfill = len(problem._parameters.landfill_facilities)
         _ij_slice = slice(0,len(problem._ij_list))
         _jk_kp_slice = slice(len(problem._ij_list), n_var)
-        M_ij = create_ranges(num_sorting,n_matings, X[:,:,_ij_slice].shape[2])
+        M_ij = create_ranges(num_sorting, n_matings, X[:,:,_ij_slice].shape[2])
         M_jk_kp = create_ranges(num_incinerators + num_landfill,n_matings, X[:,:,_jk_kp_slice].shape[2])
         M = np.concatenate([M_ij, M_jk_kp], axis = 1)
         _X = crossover_mask(X, M)
@@ -603,13 +606,35 @@ class CustomCrossover(Crossover):
         return _X
 
 class RepairGraph(Repair):
+
+    def shrink(self, _norm_continuous_for_j, supplies):
+        denormalize = lambda x_4d, in_supplies: x_4d * in_supplies
+        _non_zero_mask = _norm_continuous_for_j != 0
+        only_originals = _norm_continuous_for_j.copy()
+        only_originals[~_non_zero_mask] = 0
+        only_originals_ix = np.sum(only_originals, axis = 2) > 1
+        while len(only_originals[only_originals_ix]) > 0:
+            _norm_continuous_for_j, only_originals = update_by_shrinking(_norm_continuous_for_j, only_originals, _non_zero_mask,only_originals,only_originals_ix)
+            only_originals_ix = np.sum(only_originals, axis = 2) > 1
+        
+        _mask_less_than_1 = np.sum(_norm_continuous_for_j, axis = 2) < 1
+        f_copy = _norm_continuous_for_j.copy()
+        non_zero_count = np.count_nonzero(_non_zero_mask[_mask_less_than_1], axis = 1)
+        non_zero_count[non_zero_count == 0] += 1
+        f_copy[_mask_less_than_1] += ((1-np.sum(f_copy[_mask_less_than_1], axis=1))/non_zero_count)[:,np.newaxis]
+        _norm_continuous_for_j[_non_zero_mask] = f_copy[_non_zero_mask]
+        _continuous_for_j = denormalize(_norm_continuous_for_j, supplies)
+        return _continuous_for_j
+
     def _add_zeroes(self, 
                     Z : np.ndarray, 
                     binary_slice : slice,
-                    integer_slice : slice,
-                    continuous_slice : slice,
-                    num_facilities : int,
-                    supplies : np.ndarray) -> np.ndarray:
+                    supplies : np.ndarray,
+                    num_facilities : int = None,
+                    integer_slice : slice = None,
+                    continuous_slice : slice = None,
+                    continuous_for_j : np.ndarray = None,
+                    integer_for_j : np.ndarray = None) -> np.ndarray:
         """
         If a binary variable is zero, then the corresponding integer and continuous variables are
         zeroed out. If the sum of the continuous variables is less than one, then the continuous
@@ -630,37 +655,20 @@ class RepairGraph(Repair):
         :return: The return value is the new population, with added zeroes.
         """
         normalize = lambda x_4d, in_supplies: x_4d/in_supplies
-        denormalize = lambda x_4d, in_supplies: x_4d * in_supplies
         _binary_for_j = Z[:, binary_slice].reshape(Z.shape[0], -1, 3)
-        _integer_for_j = Z[:, integer_slice].reshape(Z.shape[0], -1, num_facilities)
-        _continuous_for_j = Z[:, continuous_slice].reshape(Z.shape[0], -1, num_facilities)
+        if not isinstance(integer_for_j, np.ndarray) and not isinstance(continuous_for_j, np.ndarray):
+            integer_for_j = Z[:, integer_slice].reshape(Z.shape[0], -1, num_facilities)
+            continuous_for_j = Z[:, continuous_slice].reshape(Z.shape[0], -1, num_facilities)
         edited_supplies = supplies.copy()
-        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) * 10
-        _norm_continuous_for_j = normalize(_continuous_for_j, edited_supplies)
+        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 100
+        _norm_continuous_for_j = normalize(continuous_for_j, edited_supplies)
         _indices_binary_zero = np.where(np.sum(_binary_for_j, axis = 2) == 0)
-        _integer_for_j[_indices_binary_zero[0],:,_indices_binary_zero[1]] = 0
+        integer_for_j[_indices_binary_zero[0],:,_indices_binary_zero[1]] = 0
         _norm_continuous_for_j[_indices_binary_zero[0],:,_indices_binary_zero[1]] = 0
-        _integer_for_j[ _norm_continuous_for_j == 0] = 0
-        _norm_continuous_for_j[_integer_for_j == 0] = 0
-
-        _non_zero_mask = _norm_continuous_for_j != 0
-        only_originals = _norm_continuous_for_j.copy()
-        only_originals[~_non_zero_mask] = 0
-        only_originals_ix = np.sum(only_originals, axis = 2) > 1
-        while len(only_originals[only_originals_ix]) > 0:
-            _norm_continuous_for_j, only_originals = update_by_shrinking(_norm_continuous_for_j, only_originals, _non_zero_mask,only_originals,only_originals_ix)
-            only_originals_ix = np.sum(only_originals, axis = 2) > 1
-        
-        _mask_less_than_1 = np.sum(_norm_continuous_for_j, axis = 2) < 1
-        f_copy = _norm_continuous_for_j.copy()
-        non_zero_count = np.count_nonzero(_non_zero_mask[_mask_less_than_1], axis = 1)
-        non_zero_count[non_zero_count == 0] += 1
-        f_copy[_mask_less_than_1] += ((1-np.sum(f_copy[_mask_less_than_1], axis=1))/non_zero_count)[:,np.newaxis]
-        _norm_continuous_for_j[_non_zero_mask] = f_copy[_non_zero_mask]
-        _continuous_for_j = denormalize(_norm_continuous_for_j, supplies)
-        Z[:, continuous_slice] = _continuous_for_j.reshape(Z[:, continuous_slice].shape)
-        Z[:, integer_slice] = _integer_for_j.reshape(Z[:, integer_slice].shape)
-        return Z
+        integer_for_j[ _norm_continuous_for_j == 0] = 0
+        _norm_continuous_for_j[integer_for_j == 0] = 0
+        _d_continuous_for_j = self.shrink(_norm_continuous_for_j, edited_supplies)
+        return _d_continuous_for_j, integer_for_j
 
     def _do(self, problem, pop : np.ndarray, **kwargs):
         """
@@ -673,13 +681,34 @@ class RepairGraph(Repair):
         :type pop: np.ndarray
         :return: The population with the added zeroes.
         """
+        def _create_link_k_kp(Z, jk_slice, jkp_slice):
+            _link_k_for_j = Z[:, jk_slice].reshape(-1, num_sorting, num_incinerator)
+            _link_kp_for_j = Z[:, jkp_slice].reshape(-1, num_sorting, num_landfill)
+            _link_k_kp_for_j = np.dstack([_link_k_for_j, _link_kp_for_j])
+            return _link_k_kp_for_j
+
+        def _split_and_override(Z, jk_slice, jkp_slice, _jk_kp_for_j):
+            n_landfills = num_landfill + (int(num_landfill < num_incinerator) * np.abs(num_incinerator - num_landfill + 1))
+            _jk_for_j, _kp0_for_j, _kp_1_for_j = np.dsplit(_jk_kp_for_j, [num_incinerator, n_landfills])
+            _jkp_for_j = np.dstack([_kp0_for_j, _kp_1_for_j])
+            Z[:, jk_slice] = _jk_for_j.reshape(Z[:, jk_slice].shape)
+            Z[:, jkp_slice] = _jkp_for_j.reshape(Z[:, jkp_slice].shape)
+            return Z
+
         Z = pop.get("X")
-        num_sorting = len(problem._parameters._sorting_facilities)
-        num_incinerator = len(problem._parameters._incinerator_facilities)
-        num_landfill = len(problem._parameters._landfill_facilities)
-        Z = self._add_zeroes(Z, problem.binary_sorting_slice, problem.integer_ij_slice, problem.continuous_ij_slice, num_sorting, problem.supplies[:, np.newaxis])
+        num_sorting = len(problem._parameters.sorting_facilities)
+        num_incinerator = len(problem._parameters.incinerator_facilities)
+        num_landfill = len(problem._parameters.landfill_facilities)
+        ij_f_for_j, ij_x_for_j = self._add_zeroes(Z, problem.binary_sorting_slice, problem.supplies[:, np.newaxis], num_facilities = num_sorting, integer_slice = problem.integer_ij_slice, continuous_slice = problem.continuous_ij_slice)
+        Z[:, problem.integer_ij_slice] = ij_x_for_j.reshape(Z[:, problem.integer_ij_slice].shape)
+        Z[:, problem.continuous_ij_slice] = ij_f_for_j.reshape(Z[:, problem.continuous_ij_slice].shape)
         _supplies_j = np.sum(Z[:, problem.continuous_ij_slice].reshape(Z.shape[0], -1, num_sorting), axis = 1)[:,:,np.newaxis]
-        Z = self._add_zeroes(Z, problem.binary_end_facility_slice, problem.integer_end_link_slice, problem.continuous_end_link_slice, num_incinerator+num_landfill, _supplies_j)
+        _jk_kp_f_for_j = _create_link_k_kp(Z, problem.continuous_jk_slice, problem.continuous_jkp_slice)
+        _jk_kp_x_for_j = _create_link_k_kp(Z, problem.integer_jk_slice, problem.integer_jkp_slice)
+        _jk_kp_f_for_j, _jk_kp_x_for_j = self._add_zeroes(Z, problem.binary_end_facility_slice, _supplies_j, continuous_for_j = _jk_kp_f_for_j, integer_for_j = _jk_kp_x_for_j)
+        Z = _split_and_override(Z, problem.continuous_jk_slice, problem.continuous_jkp_slice, _jk_kp_f_for_j)
+        Z = _split_and_override(Z, problem.integer_jk_slice, problem.integer_jkp_slice, _jk_kp_x_for_j)
+        
         return pop.set("X", Z)
 
         
@@ -778,6 +807,10 @@ class Minimize():
         else:
             raise ValueError(f"{self._algorithm} is an invalid algorithm. Use one of nsga3, nsga2, unsga3, agemoea, moead, or cteae.")
         return algorithm
+    
+    def plot_graph():
+        pass
+    
     def minimize_heuristic(self):
         """
         The `minimize_heuristic` method is the main method of the class. It takes in the
@@ -793,7 +826,7 @@ class Minimize():
             seed=self._seed,
             verbose=self._verbose,
             save_history= False)
-
+        
         return res
 
     def _create_mixed_variables(self):
@@ -804,7 +837,7 @@ class Minimize():
         functions
         :return: The sampling, crossover, and mutation methods for the mixed variables.
         """
-        _num_facilities = len(self._problem._parameters._sorting_facilities) + len(self._problem._parameters._incinerator_facilities) + len(self._problem._parameters._landfill_facilities)
+        _num_facilities = len(self._problem._parameters.sorting_facilities) + len(self._problem._parameters.incinerator_facilities) + len(self._problem._parameters.landfill_facilities)
         _mask_binary = np.array(["bin" for _ in range(self._problem.num_binary_vars)])
         _mask_integer = np.array(["int" for _ in range(self._problem.num_integer_vars)])
         _mask_continuous = np.array(["real" for _ in range(self._problem.num_continuous_vars)])

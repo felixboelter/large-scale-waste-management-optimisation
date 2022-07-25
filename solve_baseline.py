@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 import ast
 import time
 from parameters import Parameters
+from plotter import Plotter
 
 FND = TypeVar("FND", float, np.ndarray)
 
@@ -39,16 +40,16 @@ class Model_Baseline():
         self.model = Model(name="Baseline")
         self._verbose = verbose
         self._plot_graph = plot_graph
-        self._ij_list = [(i,j,w['weight']) for i, j, w in self._parameters._G.G.edges(data=True) if (i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities)]
-        self._jk_list = [(j,k,w['weight']) for j, k, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities)]
-        self._jkp_list = [(j,kp,w['weight']) for j, kp, w in self._parameters._G.G.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities)]
+        self._ij_list = [(i,j,w['weight']) for i, j, w in self._parameters.G.G.edges(data=True) if (i in self._parameters.G.collection_locations and j in self._parameters.sorting_facilities)]
+        self._jk_list = [(j,k,w['weight']) for j, k, w in self._parameters.G.G.edges(data=True) if (j in self._parameters.sorting_facilities and k in self._parameters.incinerator_facilities)]
+        self._jkp_list = [(j,kp,w['weight']) for j, kp, w in self._parameters.G.G.edges(data=True) if (j in self._parameters.sorting_facilities and kp in self._parameters.landfill_facilities)]
         self._S = 0
         self._I = 1
         self._L = 2
         self._create_decision_variables()
-        self._sorting_tuple = (self._S, self._y_sorting, self._parameters._sorting_facilities)
-        self._incinerator_tuple = (self._I, self._y_incinerator, self._parameters._incinerator_facilities)
-        self._landfill_tuple = (self._L, self._y_landfill, self._parameters._landfill_facilities)
+        self._sorting_tuple = (self._S, self._y_sorting, self._parameters.sorting_facilities)
+        self._incinerator_tuple = (self._I, self._y_incinerator, self._parameters.incinerator_facilities)
+        self._landfill_tuple = (self._L, self._y_landfill, self._parameters.landfill_facilities)
         self.solved_model : Union[docplex.mp.solution.SolveSolution, None] = None
         self.minimization = str()
         self.solved_graph : nx.DiGraph = None
@@ -66,9 +67,9 @@ class Model_Baseline():
         x - The number of trips on edges (i,j), (j,k), and (j,k').
         f - The amount of solid waste transported on edges (i,j), (j,k), and (j,k').
         """
-        self._y_sorting = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters._sorting_facilities for j in self._parameters._range_of_facility_sizes}
-        self._y_incinerator = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters._incinerator_facilities for j in self._parameters._range_of_facility_sizes}
-        self._y_landfill = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters._landfill_facilities for j in self._parameters._range_of_facility_sizes}
+        self._y_sorting = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters.sorting_facilities for j in self._parameters._range_of_facility_sizes}
+        self._y_incinerator = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters.incinerator_facilities for j in self._parameters._range_of_facility_sizes}
+        self._y_landfill = {(i,j): self.model.binary_var(name=f"y_{i}_{j}") for i in self._parameters.landfill_facilities for j in self._parameters._range_of_facility_sizes}
         self._x_ij = {(i,j) : self.model.integer_var(name=f'x_{i}_{j}') for i,j,_ in self._ij_list}
         self._x_jk = {(j,k) : self.model.integer_var(name=f'x_{j}_{k}') for j,k,_ in self._jk_list}
         self._x_jkp = {(j,kp) : self.model.integer_var(name=f'x_{j}_{kp}') for j,kp,_ in self._jkp_list}
@@ -131,7 +132,7 @@ class Model_Baseline():
             for ix in range(0, len(size_dependent_f)):
                 self.model.add_constraint(size_dependent_f[ix] <= size_capacity[ix])
        
-        def _transportation_capacity_limitations(edge_list : list, x_variable : Model.integer_var, f_variable : Model.continuous_var) -> None:
+        def _transportation_capacity_limitations(edge_list : list, x_variable : Model.integer_var, f_variable : Model.continuous_var, maximum_amount_transport : int) -> None:
             """
             For each edge in the edge list, add a constraint that the flow on that edge is less than
             the maximum amount of transport times the decision variable for that edge. 
@@ -144,8 +145,7 @@ class Model_Baseline():
             :type f_variable: Model.continuous_var
             """
             for i,j,_ in edge_list:
-                for l in range(0,len(self._parameters.maximum_amount_transport)):
-                    self.model.add_constraint(f_variable[(i,j)] <= self._parameters.maximum_amount_transport[l] * x_variable[(i,j)])
+                self.model.add_constraint(f_variable[(i,j)] <= maximum_amount_transport * x_variable[(i,j)])
         
         def _one_size_selection_constraint(facilities : list, y_variable : Model.binary_var) -> None:
             """
@@ -174,30 +174,30 @@ class Model_Baseline():
         # Constraints 
         # Constraint 1: Outflow of waste from any collection center i must be equal to the amount of available waste at i
         for key, val in _ij_for_i_dict.items():
-            self.model.add_constraint(self.model.sum(self._f_ij[(key,j)] for j in val) == self._parameters._G.supplies[key][0])
-        # Constraint 2: Flow balance, inflow of waste at sorting facility j is ENTIRELY forwarded to incinerator k or landfill k'
+            self.model.add_constraint(self.model.sum(self._f_ij[(key,j)] for j in val) == self._parameters.G.supplies[key][0])
+        # Constraint 2: Flow balance, inflow of waste at sorting facility j is ENTIRELY forwarded to incinerator k and landfill k'
         _sum_f_ij_for_j= [self.model.sum(self._f_ij[(i,j)] for i in i_values) for j, i_values in _ij_for_j_dict.items()]
         _sum_f_jk_for_j = [self.model.sum(self._f_jk_kp[(j,k)] for k in k_values) for j, k_values in _jk_kp_for_j_dict.items()]
         for ix in range(0, len(_sum_f_jk_for_j)):
             self.model.add_constraint(_sum_f_ij_for_j[ix] == _sum_f_jk_for_j[ix])
         # Constraint 3: Size dependent capacity constraint for sorting facilities
-        _size_dependent_capacity_constraint(self._S, self._y_sorting, _sum_f_ij_for_j, self._parameters._sorting_facilities)
+        _size_dependent_capacity_constraint(self._S, self._y_sorting, _sum_f_ij_for_j, self._parameters.sorting_facilities)
         # Constraint 4: Size dependent capcity constraint for incinerator facilities
         _sum_f_jk_for_k = [self.model.sum(self._f_jk_kp[(j,k)] for j in j_value) for k, j_value in _jk_for_k_dict.items()] 
-        _size_dependent_capacity_constraint(self._I, self._y_incinerator, _sum_f_jk_for_k, self._parameters._incinerator_facilities)
-        # Constraint 5: Size dependent capcity constraint for landfill facilities
+        _size_dependent_capacity_constraint(self._I, self._y_incinerator, _sum_f_jk_for_k, self._parameters.incinerator_facilities)
+        # Constraint 5: Size dependent capacity constraint for landfill facilities
         _sum_f_jk_for_kp = [self.model.sum(self._f_jk_kp[(j,kp)]for j in j_value) for kp, j_value in _jkp_for_kp_dict.items()] 
-        _size_dependent_capacity_constraint(self._L, self._y_landfill, _sum_f_jk_for_kp, self._parameters._landfill_facilities)
+        _size_dependent_capacity_constraint(self._L, self._y_landfill, _sum_f_jk_for_kp, self._parameters.landfill_facilities)
         # Constraint (6, 7, 8) : Transportation capacity limitations for ((i, j), (j, k), (j, kp))
-        _ij_tuple = (self._ij_list, self._x_ij, self._f_ij)
-        _jk_tuple = (self._jk_list, self._x_jk, self._f_jk_kp)
-        _jkp_tuple = (self._jkp_list, self._x_jkp, self._f_jk_kp)
-        for edge_list, x_decision_value, f_decision_value in [_ij_tuple, _jk_tuple, _jkp_tuple]:
-            _transportation_capacity_limitations(edge_list, x_decision_value, f_decision_value)
+        _ij_tuple = (self._ij_list, self._x_ij, self._f_ij, self._parameters.maximum_amount_transport[0])
+        _jk_tuple = (self._jk_list, self._x_jk, self._f_jk_kp, self._parameters.maximum_amount_transport[1])
+        _jkp_tuple = (self._jkp_list, self._x_jkp, self._f_jk_kp, self._parameters.maximum_amount_transport[1])
+        for edge_list, x_decision_value, f_decision_value, transport_capacity in [_ij_tuple, _jk_tuple, _jkp_tuple]:
+            _transportation_capacity_limitations(edge_list, x_decision_value, f_decision_value, transport_capacity)
         # Constraint (9, 10, 11): One size selection for (sorting, incinerator, landfill) facilities
-        _sorting_tuple = (self._parameters._sorting_facilities, self._y_sorting)
-        _incinerator_tuple = (self._parameters._incinerator_facilities, self._y_incinerator)
-        _landfill_tuple = (self._parameters._landfill_facilities, self._y_landfill)
+        _sorting_tuple = (self._parameters.sorting_facilities, self._y_sorting)
+        _incinerator_tuple = (self._parameters.incinerator_facilities, self._y_incinerator)
+        _landfill_tuple = (self._parameters.landfill_facilities, self._y_landfill)
         for facilities, decision_values in [_sorting_tuple, _incinerator_tuple, _landfill_tuple]:
             _one_size_selection_constraint(facilities, decision_values)
     
@@ -384,7 +384,10 @@ class Model_Baseline():
                     # Add the edge to a graph with the distance as an edge weight.
                     self.solved_graph.add_edge(first_node, second_node, weight=distance)
             df = self.create_dataframe(df)
-            if self._plot_graph: _figs.append(self.plot_graph())
+            if self._plot_graph: 
+                _facility_sizes = {self._parameters.G.node_translator[ast.literal_eval(key[1])]:key[2] for key in self._data_locations if 'y' in key}
+                plotting = Plotter(self._parameters, self.solved_graph, _facility_sizes)
+                _figs.append(plotting.plot_graph())
         if self._plot_graph:
             if len(list_of_functions) == 1:
                 _figs[0].show()
@@ -423,9 +426,9 @@ class Model_Baseline():
         _opening_cost = 0
         _opening_cost_array = self._parameters.opening_costs
         for j, l in y_decisions:
-            if j in self._parameters._sorting_facilities:  _opening_cost += _opening_cost_array[0][l]
-            elif j in self._parameters._incinerator_facilities: _opening_cost += _opening_cost_array[1][l]
-            elif j in self._parameters._landfill_facilities: _opening_cost += _opening_cost_array[2][l]
+            if j in self._parameters.sorting_facilities:  _opening_cost += _opening_cost_array[0][l]
+            elif j in self._parameters.incinerator_facilities: _opening_cost += _opening_cost_array[1][l]
+            elif j in self._parameters.landfill_facilities: _opening_cost += _opening_cost_array[2][l]
         _operational_cost = 0
         _operational_cost_array = self._parameters.operational_costs
         for index, edge_list in enumerate([self._ij_data, self._jk_data, self._jkp_data]):
@@ -444,9 +447,9 @@ class Model_Baseline():
         land_usage = 0
         land_stress_ratio_array = self._parameters.land_stress_ratios
         for j, l in y_decisions:
-            if j in self._parameters._sorting_facilities:  land_usage += land_stress_ratio_array[0][l]
-            elif j in self._parameters._incinerator_facilities: land_usage += land_stress_ratio_array[1][l]
-            elif j in self._parameters._landfill_facilities: land_usage += land_stress_ratio_array[2][l]
+            if j in self._parameters.sorting_facilities:  land_usage += land_stress_ratio_array[0][l]
+            elif j in self._parameters.incinerator_facilities: land_usage += land_stress_ratio_array[1][l]
+            elif j in self._parameters.landfill_facilities: land_usage += land_stress_ratio_array[2][l]
         return land_usage
 
     def _calculate_health_impact(self, y_decisions : List[Tuple[Any, int]], x_decisions : Dict[tuple, Any]) -> Tuple[float, float]:
@@ -471,9 +474,9 @@ class Model_Baseline():
         pop_near_facilities = self._parameters.population_near_facilities
         facility_dalys = self._parameters.facility_daly_per_person
         for j, l in y_decisions:
-            if j in self._parameters._sorting_facilities:  facility_health_impact += pop_near_facilities[j][0][l] * facility_dalys[j][l]
-            elif j in self._parameters._incinerator_facilities: facility_health_impact += pop_near_facilities[j][1][l] * facility_dalys[j][l]
-            elif j in self._parameters._landfill_facilities: facility_health_impact += pop_near_facilities[j][2][l] * facility_dalys[j][l]
+            if j in self._parameters.sorting_facilities:  facility_health_impact += pop_near_facilities[j][0][l] * facility_dalys[j][l]
+            elif j in self._parameters.incinerator_facilities: facility_health_impact += pop_near_facilities[j][1][l] * facility_dalys[j][l]
+            elif j in self._parameters.landfill_facilities: facility_health_impact += pop_near_facilities[j][2][l] * facility_dalys[j][l]
 
         transport_health_impact = 0
         population_for_edge = self._parameters.link_populations
@@ -494,9 +497,9 @@ class Model_Baseline():
         :type name: Optional[str]
         :return: The dataframe is being returned.
         """
-        self._ij_data = [(i,j,w['weight']) for i, j, w in self.solved_graph.edges(data=True) if i in self._parameters._G.collection_locations and j in self._parameters._sorting_facilities]
-        self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and k in self._parameters._incinerator_facilities)]
-        self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if (j in self._parameters._sorting_facilities and kp in self._parameters._landfill_facilities)]
+        self._ij_data = [(i,j,w['weight']) for i, j, w in self.solved_graph.edges(data=True) if i in self._parameters.G.collection_locations and j in self._parameters.sorting_facilities]
+        self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if (j in self._parameters.sorting_facilities and k in self._parameters.incinerator_facilities)]
+        self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if (j in self._parameters.sorting_facilities and kp in self._parameters.landfill_facilities)]
         _y_decisions = [(ast.literal_eval(key[1]), int(key[2])) for key, _ in self.df_solved_model_list if 'y' in key]
         _x_decisions = {(ast.literal_eval(key[1]), ast.literal_eval(key[2])): value for key, value in self.df_solved_model_list if 'x' in key}
         _cost_objective : Tuple[float, float] = self._calculate_cost(_y_decisions, _x_decisions)
@@ -507,139 +510,6 @@ class Model_Baseline():
         df.loc[len(df.index)] = [obj_name, f"{sum(_cost_objective):8f}", _land_objective, f"{sum(_health_objective):8f}"]
         return df
 
-    def plot_graph(self, figure_name : Optional[str] = None):
-        """
-        This function takes in a solved model and plots the graph with the edges coloured based on the
-        edge weights
-        
-        :param figure_name: The name of the figure
-        :type figure_name: Optional[str]
-        :return: The plotly figure object.
-        """
-        def _edge_colours(G, value1: int, value2: int) -> Tuple[list, list, str, int, str]:
-            """
-            This function takes in a graph, and two values, and returns the x and y coordinates of the
-            edges, the color of the edges, the width of the edges, and the name of the edges
-
-            :param G: The graph object
-            :param value1: The low value of the range
-            :type value1: int
-            :param value2: The high value of the range
-            :type value2: int
-            :return: The edge_x and edge_y coordinates, the color, the width and the name of the line.
-            """
-            edge_x = []
-            edge_y = []
-            for i,j,w in G.edges(data=True):
-                x0, y0 = i
-                x1, y1 = j
-                weight = w['weight']
-                if weight >= value1 and weight < value2:
-                    edge_x.append(x0)
-                    edge_x.append(x1)
-                    edge_x.append(None)
-                    edge_y.append(y0)
-                    edge_y.append(y1)
-                    edge_y.append(None)
-            if value1 == 60:
-                color = "#DF4E4F"
-                width = 1
-                name = "Distance > 60"
-            elif value1 == 40:
-                color = '#FDB813'
-                width = 2
-                name = "Distance > 40"
-            elif value1 == 0:
-                color = '#4E9B47'
-                width = 4
-                name = "Distance < 40"
-            return edge_x, edge_y, color, width, name
-
-        CATEGORIES = 3
-        VALUES = [0, 40, 60, 101]
-        assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
-        if figure_name == None: figure_name= f"Solved solution for objective: {self.minimization}"
-        fig = go.Figure(layout=go.Layout(
-                        title=figure_name,
-                        title_x = 0.5,
-                        legend=dict(
-                            x=1,
-                            y=1,
-                            traceorder="reversed",
-                            title_font_family="Times New Roman",
-                            font=dict(
-                                family="Courier",
-                                size=12,
-                                color="black"
-                            ),
-                            bordercolor="Black",
-                            borderwidth=2
-                        ),
-                        annotations=[ dict(
-                                text= f"<b>Total Unsorted Supply:</b> {sum([us for us,_  in self._parameters._G.supplies.values()])}",
-                                showarrow=False,
-                                align = 'left',
-                                x=0.005, y=-0.002 ) ],
-                        showlegend=True,
-                        hovermode='closest',
-                        margin=dict(b=20,l=5,r=5,t=40),
-                        xaxis=dict(showgrid=True, zeroline=False, showticklabels=True),
-                        yaxis=dict(showgrid=True, zeroline=False, showticklabels=True))
-                        )
-        for i in range(CATEGORIES):
-            x_edges, y_edges, colors, widths, name = _edge_colours(self.solved_graph,VALUES[i], VALUES[i+1])
-            fig.add_trace(go.Scatter(
-                x=x_edges, 
-                y=y_edges,
-                showlegend=True,
-                name= name,
-                line = dict(
-                    color = colors,
-                    width = widths),
-                hoverinfo='none',
-                mode='lines'))
-        _node_colours = dict()
-        _custom_node_attrs = dict()
-        _data_locations_y = {ast.literal_eval(key[1]):key[2] for key in self._data_locations if 'y' in key}
-        dictionary_values = {0 : "Small", 1: "Medium", 2 : "Large"}
-        for node in self.solved_graph.nodes():
-            if node in self._parameters._G.collection_locations: 
-                _node_colours[node] = ["Collection Center", '#D7D2CB']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Unsorted Supply: {self._parameters._G.supplies[node][0]}"
-            elif node in self._parameters._sorting_facilities: 
-                _node_colours[node] = ["Sorting Facility", '#6AC46A']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
-            elif node in self._parameters._incinerator_facilities: 
-                _node_colours[node] = ["Incinerator Facility", '#952E25']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
-            elif node in self._parameters._landfill_facilities: 
-                _node_colours[node] = ["Landfill Facility", '#00C0F0']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
-        
-        seen_node_colours = []
-        for node in self.solved_graph.nodes():
-            if _node_colours[node] not in seen_node_colours:
-                temp_x = []
-                temp_y = []
-                temp_attr = []
-                current_node_colour = _node_colours[node]
-                seen_node_colours.append(current_node_colour)
-                for key, value in _node_colours.items():
-                    if value == current_node_colour:
-                        temp_x.append(key[0])
-                        temp_y.append(key[1])
-                        temp_attr.append(_custom_node_attrs[key])
-                fig.add_trace(go.Scatter(
-                    x=temp_x, y=temp_y,
-                    mode='markers',
-                    hoverinfo='text',
-                    text = temp_attr,
-                    name=f"{current_node_colour[0]}",
-                    marker=dict(
-                        color=current_node_colour[1],
-                        size=20,
-                        line_width=2)))
-        return fig
 
 class Multiobjective_model(Model_Baseline):
     """
@@ -770,7 +640,11 @@ class Multiobjective_model(Model_Baseline):
             
             self.org_df = self.create_dataframe(self.org_df, name = _name)
             plot_names.append(_name)
-            if plot_graph: _figures.append(self.plot_graph(f"Solution for {_name}"))
+
+            if plot_graph: 
+                _facility_sizes = {self._parameters.G.node_translator[ast.literal_eval(key[1])]:key[2] for key in self._data_locations if 'y' in key}
+                plotting = Plotter(self._parameters, self.solved_graph, _facility_sizes)
+                _figures.append(plotting.plot_graph(f"Solution for {_name}"))
         self.org_df.set_index('Objective Name', inplace=True)
         if plot_graph:
             _num_of_cols_rows = len(all_double_combinations)//2
@@ -793,11 +667,12 @@ class Multiobjective_model(Model_Baseline):
 
 if __name__ == '__main__':
     set_seed = 0
-    RandomGraph = Graph(8,baseline=True,plot_graph=False, seed=set_seed)
+    plot_graph = True
+    RandomGraph = Graph(8,baseline=True,plot_graph=plot_graph, seed=set_seed)
     parameters = Parameters(RandomGraph, set_seed)
-    model_baseline = Model_Baseline(parameters, plot_graph=False, verbose=False)
+    model_baseline = Model_Baseline(parameters, plot_graph=plot_graph, verbose=False)
     list_of_functions = [model_baseline.minimize_cost, model_baseline.minimize_health_impact]
-    data = model_baseline.solve_model(list_of_functions)
+    _,data = model_baseline.solve_model(list_of_functions)
     mo = Multiobjective_model(parameters, df = data) 
-    df = mo.solve_multi_objective()
+    df = mo.solve_multi_objective(plot_graph=plot_graph)
     print(df)

@@ -28,17 +28,17 @@ class Parameters():
         """
 
         np.random.seed(seed)
-        self._G = G
-        self._sorting_facilities = [k for k, v in self._G.special_locations.items() if 'J' in v]
-        self._incinerator_facilities = [k for k, v in self._G.special_locations.items() if 'K' in v]
-        self._landfill_facilities = [k for k, v in self._G.special_locations.items() if "K'" in v]
+        self.G = G
+        self.sorting_facilities = [k for k, v in self.G.special_locations.items() if 'J' in v]
+        self.incinerator_facilities = [k for k, v in self.G.special_locations.items() if 'K' in v]
+        self.landfill_facilities = [k for k, v in self.G.special_locations.items() if "K'" in v]
         self._direct_land_usage =  np.array([4800,8000,16000, 8000,16000, 24000, 80000,160000,192000]).reshape(3,3)
         self._indirect_land_usage =  np.array([6191,10780,21559, 11971,23941,35911, 127770,255525,335295]).reshape(3,3)
         self._range_of_facility_sizes = range(0, self._direct_land_usage.shape[1])
-        self.facility_storage_capacities : np.ndarray= self._G.add_custom_parameter(name= 'facility_storage', size=(3,3), fixed_number=[50,100,300,50,100,150,50,100,150])
-        self.maximum_amount_transport : np.ndarray= self._G.add_custom_parameter(name = 'maximum_amount_transport', size = 2, fixed_number=[16,32])
+        self.facility_storage_capacities : np.ndarray= self.G.add_custom_parameter(name= 'facility_storage', size=(3,3), fixed_number=[50,100,300,50,100,150,50,100,150])
+        self.maximum_amount_transport : np.ndarray= self.G.add_custom_parameter(name = 'maximum_amount_transport', size = 2, fixed_number=[16,32])
         _random_increasing = [np.random.randint(low=l,high=h) for l,h in [(100000,200000),(200000,400000),(100000,200000)]]
-        self.operational_costs : np.ndarray = self._G.add_custom_parameter(name='operational_costs',size=(3),fixed_number=_random_increasing)
+        self.operational_costs : np.ndarray = self.G.add_custom_parameter(name='operational_costs',size=(3),fixed_number=_random_increasing)
         self.land_stress_ratios : np.ndarray = self._create_land_usage_stress_ratios()
         self.opening_costs : np.ndarray = self._create_opening_costs()
         self.link_populations : Dict[tuple, int] = self._create_population_near_links()
@@ -59,10 +59,10 @@ class Parameters():
                                 [5.95, 11.9, 17.85],
                                 [3.89, 7.78, 11.66]])
         daly_per_person = dict()
-        for ix, facilities in enumerate([self._sorting_facilities, self._incinerator_facilities, self._landfill_facilities]): 
+        for ix, facilities in enumerate([self.sorting_facilities, self.incinerator_facilities, self.landfill_facilities]): 
             for node in facilities:
                 daly_per_person.update({node: [self.facility_daly_matrix[ix][l] for l in self._range_of_facility_sizes]})
-        self._G.custom_parameters['facility_daly_per_person'] = daly_per_person
+        self.G.custom_parameters['facility_daly_per_person'] = daly_per_person
         return daly_per_person
 
     def _create_DALY_for_links(self) -> Dict[tuple, float]:
@@ -74,11 +74,11 @@ class Parameters():
         DALY_per_vehicle = {16 : [5.82e-07, 5.62e-08],
                             32:  [1.16e-06, 1.12e-07]}
         link_DALY = dict()
-        for i,j,w in self._G.G.edges(data=True):
+        for i,j,w in self.G.G.edges(data=True):
             weight = w['weight']
             if i == j: link_DALY[(i,j)] = (DALY_per_vehicle[16][0], DALY_per_vehicle[32][0])
             else: link_DALY[(i,j)] = (DALY_per_vehicle[16][1] * weight, DALY_per_vehicle[32][1] * weight)
-        self._G.custom_parameters['daly_per_person_links'] = link_DALY
+        self.G.custom_parameters['daly_per_person_links'] = link_DALY
         return link_DALY
     
     def DALY_for_links_tolist(self, link_daly : Dict[tuple, float]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -92,9 +92,9 @@ class Parameters():
         the links between the sorting facilities and the incinerators, and the dalys for the links
         between the sorting facilities and the landfills.
         """
-        _sorting_link_dalys = np.array([val[1] for key, val in link_daly.items() if key[0] in self._G.supplies.keys() and key[1] in self._sorting_facilities])
-        _incinerator_link_dalys = np.array([val[1] for key, val in link_daly.items() if key[0] in self._sorting_facilities and key[1] in self._incinerator_facilities ])
-        _landfill_link_dalys = np.array([val[1] for key, val in link_daly.items() if (key[0] in self._sorting_facilities and key[1] in self._landfill_facilities) ])
+        _sorting_link_dalys = np.array([val[1] for key, val in link_daly.items() if key[0] in self.G.supplies.keys() and key[1] in self.sorting_facilities])
+        _incinerator_link_dalys = np.array([val[1] for key, val in link_daly.items() if key[0] in self.sorting_facilities and key[1] in self.incinerator_facilities ])
+        _landfill_link_dalys = np.array([val[1] for key, val in link_daly.items() if (key[0] in self.sorting_facilities and key[1] in self.landfill_facilities) ])
         return _sorting_link_dalys, _incinerator_link_dalys, _landfill_link_dalys
 
     def _create_land_usage_stress_ratios(self) -> np.ndarray:
@@ -104,7 +104,7 @@ class Parameters():
         :return: Land stress ratios of all facilities of size l.
         """
         land_stress_ratios = (self._direct_land_usage+self._indirect_land_usage)/100**2
-        self._G.custom_parameters['land_stress_ratios'] = land_stress_ratios
+        self.G.custom_parameters['land_stress_ratios'] = land_stress_ratios
         return land_stress_ratios
     
     def _create_opening_costs(self) -> np.ndarray:
@@ -127,7 +127,7 @@ class Parameters():
         # Giubiasco incinerator cost: 40 Million CHF in 2004 (Inflation adjusted through: https://lik-app.bfs.admin.ch/en/lik/rechner : 42’050’290 CHF) for an area of 40,000 m^
         _opening_cost_incinerator = lambda x: x * (42050290/40000)
         _opening_cost_list = np.array([function(self._direct_land_usage[ix]) for ix,function in enumerate([_opening_cost_sorting,_opening_cost_incinerator,_opening_cost_landfill])]).tolist()
-        opening_costs = self._G.add_custom_parameter(name='opening_costs',size=(3,3), fixed_number=_opening_cost_list)
+        opening_costs = self.G.add_custom_parameter(name='opening_costs',size=(3,3), fixed_number=_opening_cost_list)
         return opening_costs
     
     def _create_population_near_links(self) -> Dict[tuple, int]:
@@ -140,13 +140,13 @@ class Parameters():
         link_populations = dict()
         HIGH = 0.05
         LOW = 0.01
-        for i,j,w in self._G.G.edges(data=True):
+        for i,j,w in self.G.G.edges(data=True):
             weight = w['weight']
             random_num = np.random.random_sample() * (HIGH - LOW) + LOW
-            if i == j: link_populations[(i,j)] = int(self._G.city_population[i])
-            else: link_populations[(i,j)] = round(((self._G.city_population[i] * random_num) + (self._G.city_population[j] * random_num)) * (weight * (1-random_num)))
+            if i == j: link_populations[(i,j)] = int(self.G.city_population[i])
+            else: link_populations[(i,j)] = round(((self.G.city_population[i] * random_num) + (self.G.city_population[j] * random_num)) * (weight * (1-random_num)))
         
-        self._G.custom_parameters['population_near_links'] = link_populations
+        self.G.custom_parameters['population_near_links'] = link_populations
         return link_populations
     def _population_near_links_tolist(self, link_populations: Dict[tuple,int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -154,9 +154,9 @@ class Parameters():
         :param link_populations: Link populations created in _create_population_near_links()
         :return: The three lists for sorting, incinerator, and landfill link populations.
         """
-        _sorting_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._G.supplies.keys() and key[1] in self._sorting_facilities)])
-        _incinerator_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._sorting_facilities and key[1] in self._incinerator_facilities)])
-        _landfill_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self._sorting_facilities and key[1] in self._landfill_facilities)])
+        _sorting_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self.G.supplies.keys() and key[1] in self.sorting_facilities)])
+        _incinerator_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self.sorting_facilities and key[1] in self.incinerator_facilities)])
+        _landfill_link_population = np.array([val for key, val in link_populations.items() if (key[0] in self.sorting_facilities and key[1] in self.landfill_facilities)])
         return _sorting_link_population, _incinerator_link_population, _landfill_link_population
     
     def _create_population_near_facilities(self) -> Dict[tuple, np.ndarray]:
@@ -168,8 +168,8 @@ class Parameters():
         """
         people_living_near_facility = dict()
         m_sqr_to_km_sqr = lambda m_sqr: m_sqr / 1e6
-        for node in self._G.G.nodes: people_living_near_facility.update({node : np.round(self._G.city_population[node] * m_sqr_to_km_sqr(self._direct_land_usage))})
-        self._G.custom_parameters['people_living_near_facility'] = people_living_near_facility
+        for node in self.G.G.nodes: people_living_near_facility.update({node : np.round(self.G.city_population[node] * m_sqr_to_km_sqr(self._direct_land_usage))})
+        self.G.custom_parameters['people_living_near_facility'] = people_living_near_facility
         return people_living_near_facility
     
     def _population_near_facilities_list(self, population_dict: Dict[tuple, np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -178,9 +178,9 @@ class Parameters():
         :param population_dict: dictionary created using the function _create_population_near_facilities().
         :return: Three lists for sorting, incinerator, and landfill population near facilities.
         """
-        _sorting_population = np.array([val[0] for key, val in population_dict.items() if key in self._sorting_facilities])
-        _incinerator_population = np.array([val[1] for key, val in population_dict.items() if key in self._incinerator_facilities])
-        _landfill_population = np.array([val[2] for key, val in population_dict.items() if key in self._landfill_facilities])
+        _sorting_population = np.array([val[0] for key, val in population_dict.items() if key in self.sorting_facilities])
+        _incinerator_population = np.array([val[1] for key, val in population_dict.items() if key in self.incinerator_facilities])
+        _landfill_population = np.array([val[2] for key, val in population_dict.items() if key in self.landfill_facilities])
         return _sorting_population, _incinerator_population, _landfill_population
 if __name__ == '__main__':
     from generate_graph import Graph

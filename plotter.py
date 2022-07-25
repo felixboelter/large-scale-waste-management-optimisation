@@ -1,11 +1,15 @@
 from plotly import graph_objs as go
 from typing import TypeVar, Dict,List, Any, Union, Tuple, Optional
 import ast
+import networkx as nx
+from parameters import Parameters
 
 class Plotter():
-    def __init__(self) -> None:
-        pass
-    def plot_graph(self, figure_name : Optional[str] = None):
+    def __init__(self, parameters : Parameters, solved_graph : nx.DiGraph, facility_sizes : dict) -> None:
+        self._parameters = parameters
+        self._solved_graph = solved_graph
+        self._facility_sizes = facility_sizes
+    def plot_graph(self, figure_name : Optional[str] = None) -> go.Figure:
         """
         This function takes in a solved model and plots the graph with the edges coloured based on the
         edge weights
@@ -55,8 +59,7 @@ class Plotter():
 
         CATEGORIES = 3
         VALUES = [0, 40, 60, 101]
-        assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
-        if figure_name == None: figure_name= f"Solved solution for objective: {self.minimization}"
+        # if figure_name == None: figure_name= f"Solved solution for objective: {self.minimization}"
         fig = go.Figure(layout=go.Layout(
                         title=figure_name,
                         title_x = 0.5,
@@ -74,7 +77,7 @@ class Plotter():
                             borderwidth=2
                         ),
                         annotations=[ dict(
-                                text= f"<b>Total Unsorted Supply:</b> {sum([us for us,_  in self._parameters._G.supplies.values()])}",
+                                text= f"<b>Total Unsorted Supply:</b> {round(sum([us for us,_  in self._parameters.G.supplies.values()]), 3)}",
                                 showarrow=False,
                                 align = 'left',
                                 x=0.005, y=-0.002 ) ],
@@ -85,7 +88,7 @@ class Plotter():
                         yaxis=dict(showgrid=True, zeroline=False, showticklabels=True))
                         )
         for i in range(CATEGORIES):
-            x_edges, y_edges, colors, widths, name = _edge_colours(self.solved_graph,VALUES[i], VALUES[i+1])
+            x_edges, y_edges, colors, widths, name = _edge_colours(self._solved_graph,VALUES[i], VALUES[i+1])
             fig.add_trace(go.Scatter(
                 x=x_edges, 
                 y=y_edges,
@@ -98,24 +101,24 @@ class Plotter():
                 mode='lines'))
         _node_colours = dict()
         _custom_node_attrs = dict()
-        _data_locations_y = {ast.literal_eval(key[1]):key[2] for key in self._data_locations if 'y' in key}
         dictionary_values = {0 : "Small", 1: "Medium", 2 : "Large"}
-        for node in self.solved_graph.nodes():
-            if node in self._parameters._G.collection_locations: 
+        for node in self._solved_graph.nodes():
+            node_name = self._parameters.G.node_translator[node]
+            if node in self._parameters.G.collection_locations: 
                 _node_colours[node] = ["Collection Center", '#D7D2CB']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Unsorted Supply: {self._parameters._G.supplies[node][0]}"
-            elif node in self._parameters._sorting_facilities: 
+                _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Unsorted Supply: {self._parameters.G.supplies[node][0]}"
+            elif node in self._parameters.sorting_facilities: 
                 _node_colours[node] = ["Sorting Facility", '#6AC46A']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
-            elif node in self._parameters._incinerator_facilities: 
+                _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(self._facility_sizes[node_name])]}"
+            elif node in self._parameters.incinerator_facilities: 
                 _node_colours[node] = ["Incinerator Facility", '#952E25']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
-            elif node in self._parameters._landfill_facilities: 
+                _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(self._facility_sizes[node_name])]}"
+            elif node in self._parameters.landfill_facilities: 
                 _node_colours[node] = ["Landfill Facility", '#00C0F0']
-                _custom_node_attrs[node] = f"Node: {node} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(_data_locations_y[node])]}"
+                _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(self._facility_sizes[node_name])]}"
         
         seen_node_colours = []
-        for node in self.solved_graph.nodes():
+        for node in self._solved_graph.nodes():
             if _node_colours[node] not in seen_node_colours:
                 temp_x = []
                 temp_y = []

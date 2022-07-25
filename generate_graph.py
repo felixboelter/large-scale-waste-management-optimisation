@@ -64,6 +64,7 @@ class Graph():
         self.custom_parameters= dict() # key = parameter name: value = numbers of parameter
         self.city_population= dict() #key = city (tuple) : value = population (int)
         self.city_sizes= dict() #key = city (tuple) : value = city size (float)
+        self.node_translator= dict() #key = node location : value = node number
         self.G = None
         np.random.seed(seed)
         self.create_graph(plot_graph=plot_graph)
@@ -190,6 +191,7 @@ class Graph():
                 index_displaced = ix+self._number_of_cities
                 node = kv[0]
                 attr = kv[1]
+                self.node_translator.update({node: index_displaced + 1})
                 if 'K' in attr:
                     node_colours[index_displaced] = ["Incinerator Candidate", '#952E25']
                 elif "K'" in attr:
@@ -199,6 +201,7 @@ class Graph():
                 custom_node_attrs[index_displaced] = f"Node: {index_displaced+1} Attr: {node_colours[index_displaced][0]}"
             for ix in range(0,len(self.collection_locations)):
                 node = self.collection_locations[ix]
+                self.node_translator.update({node: ix + 1})
                 node_colours[ix] = ["Collection Center", '#D7D2CB']
                 custom_node_attrs[ix] = f"Node: {ix+1} Attr: {node_colours[ix][0]} <br> Unsorted Supply: {self.supplies[node][0]} <br> Sorted Supply: {self.supplies[node][1]}"
 
@@ -392,6 +395,7 @@ class Graph():
             special_nodes = [random.sample(range(0,self._number_of_cities), self._number_list[i]) for i in range(len(self._number_list))]
             self.special_locations, self.demands = _create_special_locations(special_nodes, self._value_strings)
         elif self._baseline:
+            # Creating a list of the collection locations, and then creating a list of the special locations.
             self.collection_locations = [self._locations[i] for i in range(0,self._number_of_cities)]
             special_cities = [self._locations[i] for i in range(self._number_of_cities, len(self.G.nodes))]
             splits = []
