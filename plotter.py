@@ -93,7 +93,6 @@ class Plotter():
                 y=y_edges,
                 showlegend=False,
                 legendgroup=name,
-                name= name,
                 line = dict(
                     color = colors,
                     width = widths),
@@ -114,23 +113,6 @@ class Plotter():
                     width=dummy_widths[i]),
                 hoverinfo='none',
                 mode='lines'))
-        dummy_node_colours = ["#D7D2CB", '#6AC46A', '#952E25', '#00C0F0']
-        dummy_marker_symbols = ['circle', 'triangle-up', 'square', 'octagon']
-        dummy_node_names = ["Collection Center", "Sorting Facility", "Incinerator Facility", 'Landfill Facility']
-        for i in range(len(dummy_node_names)):
-            fig.add_trace(go.Scatter(
-                x=[0], y=[0.0],
-                mode='markers',
-                marker_symbol = dummy_marker_symbols[i],
-                hoverinfo='none',
-                showlegend = True,
-                name = dummy_node_names[i],
-                legendgroup = dummy_node_names[i],
-                visible="legendonly",
-                marker=dict(
-                    color=dummy_node_colours[i],
-                    size=20,
-                    line_width=2)))
         _node_colours = dict()
         _custom_node_attrs = dict()
         _node_sizes = dict()
@@ -182,7 +164,7 @@ class Plotter():
                             mode='markers',
                             marker_symbol = current_node_colour[2],
                             hoverinfo='text',
-                            showlegend = False,
+                            showlegend = True,
                             text = np.array(temp_attr)[mask],
                             name=f"{current_node_colour[0]}",
                             legendgroup = current_node_colour[0],
@@ -196,7 +178,7 @@ class Plotter():
                         mode='markers',
                         marker_symbol = current_node_colour[2],
                         hoverinfo='text',
-                        showlegend = False,
+                        showlegend = True,
                         text = temp_attr,
                         name=f"{current_node_colour[0]}",
                         legendgroup = current_node_colour[0],

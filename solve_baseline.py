@@ -24,9 +24,10 @@ def create_subplot(figures,num_rows,num_cols, plot_names):
             row_num = 2
             col_num = 1
         for item in fig['data']:
-            if idx > 0: item['showlegend'] = False
             total_fig.add_trace(item, row = row_num, col = col_num)
         col_num +=1
+    names = set()
+    total_fig.for_each_trace(lambda trace: trace.update(showlegend=False) if (trace.name in names) else names.add(trace.name))
     return total_fig
 
 def create_solved_graph(df_X, df_solved_model, solved_graph):

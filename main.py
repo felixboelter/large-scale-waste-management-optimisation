@@ -270,6 +270,8 @@ class Run():
                 _total_fig.add_trace(item, row = row_num, col = col_num)
             col_num +=1
         _total_fig.update_layout(width=1280, height=720,title_text = title, title_x = 0.5)
+        names = set()
+        _total_fig.for_each_trace(lambda trace: trace.update(showlegend=False) if (trace.name in names) else names.add(trace.name))
         return _total_fig
 
     def main(self,range_of_cities : range, range_of_instances : range, seeds : list, cplex : bool = True):
