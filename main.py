@@ -192,6 +192,15 @@ class Run():
         return results_F, results_X, result_lengths, total_times
 
     def _calulate_hypervolume(self, normalization_matrix : np.ndarray):
+        """
+        The function takes in a normalization matrix and returns a hypervolume metric object
+        
+        :param normalization_matrix: This is the matrix of all the solutions that have been generated so
+        far.
+        :type normalization_matrix: np.ndarray
+        :return: The hypervolume metric is being returned.
+        """
+
         approx_ideal = normalization_matrix.min(axis=0)
         approx_nadir = normalization_matrix.max(axis=0)
         metric = Hypervolume(ref_point= np.array([1, 1, 1]),
@@ -200,7 +209,23 @@ class Run():
                             ideal=approx_ideal,
                             nadir=approx_nadir)
         return metric
+
     def create_milp_results(self, df : pd.DataFrame, results_df : pd.DataFrame, metric_for_milp : int, total_cplex_time : float):
+        """
+        This function takes in a dataframe of the results from the MILP, the dataframe of results from
+        the other methods, the metric for the MILP, and the total time it took to run the MILP. It then
+        adds the results from the MILP to the dataframe of results from the other methods
+        
+        :param df: the dataframe that contains the results of the MILP
+        :type df: pd.DataFrame
+        :param results_df: the dataframe that will hold the results of the MILP
+        :type results_df: pd.DataFrame
+        :param metric_for_milp: Hypervolume metric for multi-objective solution.
+        :type metric_for_milp: int
+        :param total_cplex_time: The total time it took to solve the MILP
+        :type total_cplex_time: float
+        :return: The results_df is being returned.
+        """
         single_objectives = df.to_numpy().astype(np.float64).min(axis=0)
         df_fc_fu = df.loc["Cost Objective, and Land Usage Objective"]
         df_fc_fh = df.loc["Cost Objective, and Health Impact Objective"]
@@ -210,6 +235,18 @@ class Run():
         return results_df
 
     def create_heuristic_results(self, results_df : pd.DataFrame, normalization_matrix : np.ndarray, total_times : list) -> pd.DataFrame:
+        """
+        For each algorithm, we find the best hypervolume value and the corresponding solution, and add these to a dataframe.
+        
+        :param results_df: the dataframe that will be returned with the results
+        :type results_df: pd.DataFrame
+        :param normalization_matrix: the matrix of objectives
+        :type normalization_matrix: np.ndarray
+        :param total_times: list of total times for each algorithm
+        :type total_times: list
+        :return: The results_df is being returned.
+        """
+
         approx_ideal = normalization_matrix.min(axis = 0)
         approx_nadir = normalization_matrix.max(axis = 0)
         for i, algo in enumerate(self.algorithms):
@@ -231,6 +268,18 @@ class Run():
         return results_df
 
     def create_figures(self, result_lengths : list, results_X : np.ndarray, metrics_for_heuristic : list):
+        """
+        It takes the results of the optimization and creates a graph for each algorithm
+        
+        :param result_lengths: the number of results for each algorithm
+        :type result_lengths: list
+        :param results_X: the results of the optimization
+        :type results_X: np.ndarray
+        :param metrics_for_heuristic: list of hypervolume values for each heuristic
+        :type metrics_for_heuristic: list
+        :return: The figures are being returned.
+        """
+
         _all_figs = []
         for i in range(len(self.algorithms)):
             _heuristic_length = np.sum(result_lengths[:i+1])
@@ -255,6 +304,16 @@ class Run():
         return _all_figs
 
     def plot_heuristic(self, title : str, figures : list):
+        """
+        This function takes in a list of figures and returns a single figure with the subplots
+        arranged in a grid
+        
+        :param title: The title of the plot
+        :type title: str
+        :param figures: list of figures to be plotted
+        :type figures: list
+        :return: A plotly figure object
+        """
         _num_rows = int(np.ceil(len(self.algorithms)/2))
         _num_cols = 2
         _fig_names = [fig['layout']['title']['text'] for fig in figures]
@@ -275,6 +334,19 @@ class Run():
         return _total_fig
 
     def main(self,range_of_cities : range, range_of_instances : range, seeds : list, cplex : bool = True):
+        """
+        The function generates random instances of a graph, and then runs the CPLEX MILP solver on the
+        instances, and then runs the heuristic on the instances.
+        
+        :param range_of_cities: range of average number of cities
+        :type range_of_cities: range
+        :param range_of_instances: The number of instances you want to run
+        :type range_of_instances: range
+        :param seeds: list of seeds to run the heuristic on
+        :type seeds: list
+        :param cplex: If you want to run the CPLEX solver, defaults to True
+        :type cplex: bool (optional)
+        """
         randominstances_path = os.path.join(os.getcwd(), "RandomInstances")
         if os.path.exists(randominstances_path): instances = self.load_instances("RandomInstances", "instances")
         else: instances = self.generate_instances("RandomInstances", "instances")
