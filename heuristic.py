@@ -37,12 +37,12 @@ class Vectorized_heuristic(Problem):
         self._parameters = parameters
         self.num_binary_vars, self.num_integer_vars, self.num_continuous_vars = self._create_variables()
         _n_obj = 3
-        _n_constr = len(self.supplies) + (len(self._ij_list)//len(self.supplies) ) *2+ len(self._ij_list)* len(self._parameters.maximum_amount_transport) + len(self._jk_list)* len(self._parameters.maximum_amount_transport) + len(self._jkp_list)* len(self._parameters.maximum_amount_transport)
-        _n_constr += (len(self._parameters.sorting_facilities) + len(self._parameters.incinerator_facilities) +len(self._parameters.landfill_facilities))*2
+        self.n_constr = len(self.supplies)*2 + (len(self._ij_list)//len(self.supplies) ) *2 + len(self._parameters.sorting_facilities)*2 + len(self._parameters.incinerator_facilities)+ len(self._parameters.landfill_facilities) + len(self._ij_list)+ len(self._jk_list) + len(self._jkp_list)
+        # _n_constr += (len(self._parameters.sorting_facilities) + len(self._parameters.incinerator_facilities) +len(self._parameters.landfill_facilities))*2
         if verbose:
             print(f"Number of Variables: {self.num_binary_vars + self.num_integer_vars + self.num_continuous_vars}")
             print(f"Binary: {self.num_binary_vars},  Integer: {self.num_integer_vars},   Continuous: {self.num_continuous_vars}")
-            print(f"Number of constraints: {_n_constr}.")
+            print(f"Number of constraints: {self.n_constr}.")
 
         xu_bin = np.ones(self.num_binary_vars)
         xu_int = np.ones(self.num_integer_vars) * np.ceil(np.sum(self.supplies)/self._parameters.maximum_amount_transport[0])
@@ -50,7 +50,7 @@ class Vectorized_heuristic(Problem):
 
         super().__init__(n_var = self.num_binary_vars + self.num_integer_vars + self.num_continuous_vars,
                                     n_obj = _n_obj,
-                                    n_constr = _n_constr,
+                                    n_constr = self.n_constr,
                                     xl=0,
                                     xu=np.concatenate([xu_bin,xu_int,xu_cont]),
                                     **kwargs)
@@ -308,32 +308,6 @@ class Elementwise_heuristic(ElementwiseProblem):
         
         return num_binary_vars,num_integer_vars,num_continuous_vars
 
-def update_by_shrinking(main_to_update, main_update_from, main_mask, shrink_with, shrink_mask, shrink_factor : int = 10) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Update the main array with the update array, but shrink the update array first.
-    
-    :param main_to_update: the array that will be updated
-    :param main_update_from: the array that we want to update the main array with
-    :param main_mask: the mask for the main array
-    :param shrink_with: the array to shrink
-    :param shrink_mask: the mask of the shrink_with array that we want to shrink
-    :param shrink_factor: the amount to shrink the numbers by, defaults to 10
-    :type shrink_factor: int (optional)
-    :return: The updated main_to_update and main_update_from
-    """
-    def _shrink_numbers(to_update, update_with, update_mask, shrink_factor):
-        to_update[update_mask] /= np.sum(update_with[update_mask], axis=1)[:,np.newaxis] + shrink_factor
-        return to_update
-    def _update_array(to_update, update_with, mask):
-        if to_update.ndim == 4:
-            to_update[0][mask] = update_with[0][mask]
-            to_update[1][mask] = update_with[1][mask]
-        elif to_update.ndim == 3:
-            to_update[mask] = update_with[mask]
-        return to_update
-    main_update_from = _shrink_numbers(main_update_from, shrink_with, shrink_mask, shrink_factor)
-    main_to_update = _update_array(main_to_update, main_update_from, main_mask)
-    return main_to_update, main_update_from
 
 class CustomMutation(Mutation):
     def __init__(self, eta, prob=None):
@@ -374,28 +348,9 @@ class CustomMutation(Mutation):
         edited_supplies = normalize_supplies.copy()
         if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 100
         _n_link_f_for_j = self._normalize(X, num_facilities, _link_slice, edited_supplies)
-        _mutation_link_for_j = mutation_mask[:, _link_slice].reshape(mutation_mask.shape[0], -1, num_facilities)
-        
-        only_mutations = _n_link_f_for_j.copy()
-        only_mutations[~_mutation_link_for_j] = 0
-        only_originals = _n_link_f_for_j.copy()
-        only_originals[_mutation_link_for_j] = 0
-        _mutation_link_for_j[_n_link_f_for_j == 0] = False
-
-        org_greater_1 = np.sum(only_originals, axis = 2) > 1
-        while len(only_originals[org_greater_1]) > 0:
-            _n_link_f_for_j, only_originals = update_by_shrinking(_n_link_f_for_j, only_originals, ~_mutation_link_for_j, only_originals, org_greater_1)
-            org_greater_1 = np.sum(only_originals, axis = 2) > 1
-        
-        all_greater_1 = np.sum(_n_link_f_for_j, axis = 2) > 1
-        while len(only_mutations[all_greater_1]) > 0:
-            _n_link_f_for_j, only_mutations = update_by_shrinking(_n_link_f_for_j, only_mutations, _mutation_link_for_j, only_mutations, all_greater_1)
-            all_greater_1 = np.sum(_n_link_f_for_j, axis = 2) > 1
-        
-        non_zero_count = np.count_nonzero(_mutation_link_for_j, axis=2)
-        non_zero_count[non_zero_count == 0] += 1
-        only_mutations += ((1-np.sum(_n_link_f_for_j, axis=2))/non_zero_count)[:,:,np.newaxis]
-        _n_link_f_for_j[_mutation_link_for_j] = only_mutations[_mutation_link_for_j]
+        sums = np.sum(_n_link_f_for_j, axis=2)
+        sums[sums == 0] = 1
+        _n_link_f_for_j /= sums[:,:,np.newaxis]
         denormalize = lambda x_reshaped, in_supplies: x_reshaped * in_supplies
         _link_f_for_j = denormalize(_n_link_f_for_j, normalize_supplies)
         X[:, _link_slice] = _link_f_for_j.reshape(X[:, _link_slice].shape)
@@ -473,7 +428,7 @@ class CustomMutation(Mutation):
 
 
 
-class CustomCrossover(Crossover):
+class CustomRealPointCrossover(Crossover):
     def __init__(self, n_points, **kwargs):
         super().__init__(2, 2, **kwargs)
         self.n_points = n_points
@@ -494,13 +449,6 @@ class CustomCrossover(Crossover):
         :type num_facilities: int
         :return: The fixed population according to the hard constraints of the problem.
         """
-        
-        def apply_mask(X_3d : np.ndarray, M_3d : np.ndarray) -> np.ndarray:
-            _X_3d = X_3d.copy()
-            _X_3d[0][M_3d] = 0
-            _X_3d[1][M_3d] = 0
-            return _X_3d
-
 
         normalize = lambda x_reshaped, in_supplies: x_reshaped/in_supplies
         denormalize = lambda x_reshaped, in_supplies: x_reshaped * in_supplies
@@ -509,36 +457,9 @@ class CustomCrossover(Crossover):
         edited_supplies = normalize_supplies.copy()
         if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 1e6
         _n_link_f_for_j = normalize(_link_f_for_j, edited_supplies)
-        _M_ij_3d = mask.reshape(mask.shape[0], -1, num_facilities)
-        # Apply the masks for the originals and crossover candidates
-        only_originals = apply_mask(_n_link_f_for_j, _M_ij_3d)
-        only_crossovers = apply_mask(_n_link_f_for_j, ~_M_ij_3d)
-
-        # Fix originals that sum above 1 and fix crossover candiates that sum above 1
-        large_originals_mask = np.sum(only_originals, axis = 3) >= 1
-        while len(only_originals[large_originals_mask]) > 0:
-            _n_link_f_for_j, only_originals = update_by_shrinking(main_to_update = _n_link_f_for_j, 
-                                                        main_update_from = only_originals, 
-                                                        main_mask = ~_M_ij_3d, 
-                                                        shrink_with = only_originals, 
-                                                        shrink_mask = large_originals_mask)
-            large_originals_mask = np.sum(only_originals, axis = 3) >= 1
-
-        large_rows_mask = np.sum(_n_link_f_for_j, axis = 3) > 1
-        while len(only_originals[large_rows_mask]) > 0:
-            _n_link_f_for_j, only_crossovers = update_by_shrinking(main_to_update =_n_link_f_for_j, 
-                                                         main_update_from = only_crossovers, 
-                                                         main_mask = _M_ij_3d, 
-                                                         shrink_with = only_originals, 
-                                                         shrink_mask = large_rows_mask)
-            large_rows_mask = np.sum(_n_link_f_for_j, axis = 3) > 1
-        
-
-        # Add difference to 1 to the crossover candidates, s.t. sum is 1.
-        non_zero_count = np.count_nonzero(_M_ij_3d, axis=2)
-        only_crossovers += ((1-np.sum(_n_link_f_for_j, axis=3))/non_zero_count)[:,:,:,np.newaxis]
-        _n_link_f_for_j[0][_M_ij_3d] = only_crossovers[0][_M_ij_3d]
-        _n_link_f_for_j[1][_M_ij_3d] = only_crossovers[1][_M_ij_3d]
+        sums = np.sum(_n_link_f_for_j, axis=3)
+        sums[sums == 0] = 1
+        _n_link_f_for_j /= sums[:,:,:,np.newaxis]
         _link_f_for_j = denormalize(_n_link_f_for_j, normalize_supplies)
         X[:,:,link_slice] = _link_f_for_j.reshape(X[:,:,link_slice].shape)
         return X
@@ -604,27 +525,72 @@ class CustomCrossover(Crossover):
         supplies_j = np.sum(_X[:,:,_ij_slice].reshape(_X.shape[0], _X.shape[1], -1, num_sorting), axis=2)[:,:,:,np.newaxis]
         _X = self._fix_crossover(_X, supplies_j, _jk_kp_slice, M_jk_kp, num_incinerators + num_landfill)
         return _X
+class CustomBinaryBitflipMutation(Mutation):
+
+    def __init__(self, prob=None):
+        super().__init__()
+        self.prob = prob
+
+    def _do(self, problem, X, **kwargs):
+        if self.prob is None:
+            self.prob = 1.0 / problem.n_var
+
+        X = X.astype(np.bool)
+        X_for_j = X.reshape(X.shape[0], -1, 3)
+        _X = np.full(X_for_j.shape, np.inf)
+
+        M = np.random.random(X_for_j.shape)
+        flip, no_flip = M < self.prob, M >= self.prob
+        
+        _X[flip] = np.logical_not(X_for_j[flip])
+        a = np.where(_X == 1)
+        X_for_j[a[0],a[1],:] = 0
+        _X[no_flip] = X_for_j[no_flip]
+        _X = _X.reshape(X.shape)
+        return _X.astype(np.bool)
+
+class CustomBinaryPointCrossover(Crossover):
+
+    def __init__(self, n_points, **kwargs):
+        super().__init__(2, 2, **kwargs)
+        self.n_points = n_points
+
+    def _do(self, _, X, **kwargs):
+        def crossover_mask(X, M):
+            # convert input to output by flatting along the first axis
+            _X = np.copy(X)
+            _X[0][M] = X[1][M]
+            _X[1][M] = X[0][M]
+            return _X
+        # get the X of parents and count the matings
+        _, n_matings, n_var = X.shape
+
+        # start point of crossover
+        r = np.row_stack([np.random.permutation(n_var - 1) + 1 for _ in range(n_matings)])[:, :self.n_points]
+        r.sort(axis=1)
+        r = np.column_stack([r, np.full(n_matings, n_var)])
+
+        # the mask do to the crossover
+        M = np.full((n_matings, n_var), False)
+
+        # create for each individual the crossover range
+        for i in range(n_matings):
+
+            j = 0
+            while j < r.shape[1] - 1:
+                a, b = r[i, j], r[i, j + 1]
+                M[i, a:b] = True
+                j += 2
+
+        _X = crossover_mask(X, M)
+        y_for_facility = _X.reshape(_X.shape[0]*_X.shape[1], -1, 3)
+        population_ix, row_ix = np.where(np.sum(y_for_facility,axis = 2) > 1)
+        y_for_facility[population_ix, row_ix] = 0
+        _X = y_for_facility.reshape(_X.shape)
+        return _X
 
 class RepairGraph(Repair):
 
-    def shrink(self, _norm_continuous_for_j, supplies):
-        denormalize = lambda x_4d, in_supplies: x_4d * in_supplies
-        _non_zero_mask = _norm_continuous_for_j != 0
-        only_originals = _norm_continuous_for_j.copy()
-        only_originals[~_non_zero_mask] = 0
-        only_originals_ix = np.sum(only_originals, axis = 2) > 1
-        while len(only_originals[only_originals_ix]) > 0:
-            _norm_continuous_for_j, only_originals = update_by_shrinking(_norm_continuous_for_j, only_originals, _non_zero_mask,only_originals,only_originals_ix)
-            only_originals_ix = np.sum(only_originals, axis = 2) > 1
-        
-        _mask_less_than_1 = np.sum(_norm_continuous_for_j, axis = 2) < 1
-        f_copy = _norm_continuous_for_j.copy()
-        non_zero_count = np.count_nonzero(_non_zero_mask[_mask_less_than_1], axis = 1)
-        non_zero_count[non_zero_count == 0] += 1
-        f_copy[_mask_less_than_1] += ((1-np.sum(f_copy[_mask_less_than_1], axis=1))/non_zero_count)[:,np.newaxis]
-        _norm_continuous_for_j[_non_zero_mask] = f_copy[_non_zero_mask]
-        _continuous_for_j = denormalize(_norm_continuous_for_j, supplies)
-        return _continuous_for_j
 
     def _add_zeroes(self, 
                     Z : np.ndarray, 
@@ -667,9 +633,12 @@ class RepairGraph(Repair):
         _norm_continuous_for_j[_indices_binary_zero[0],:,_indices_binary_zero[1]] = 0
         integer_for_j[ _norm_continuous_for_j == 0] = 0
         _norm_continuous_for_j[integer_for_j == 0] = 0
-        _d_continuous_for_j = self.shrink(_norm_continuous_for_j, edited_supplies)
+        denormalize = lambda x_4d, in_supplies: x_4d * in_supplies
+        sums = np.sum(_norm_continuous_for_j, axis = 2)
+        sums[sums == 0] = 1
+        _norm_continuous_for_j /= sums[:,:,np.newaxis]
+        _d_continuous_for_j = denormalize(_norm_continuous_for_j, supplies)
         return _d_continuous_for_j, integer_for_j
-
     def _do(self, problem, pop : np.ndarray, **kwargs):
         """
         It takes the population, and adds zeroes to the columns of the population matrix that correspond
@@ -696,22 +665,25 @@ class RepairGraph(Repair):
             return Z
 
         Z = pop.get("X")
+        
         num_sorting = len(problem._parameters.sorting_facilities)
         num_incinerator = len(problem._parameters.incinerator_facilities)
         num_landfill = len(problem._parameters.landfill_facilities)
         ij_f_for_j, ij_x_for_j = self._add_zeroes(Z, problem.binary_sorting_slice, problem.supplies[:, np.newaxis], num_facilities = num_sorting, integer_slice = problem.integer_ij_slice, continuous_slice = problem.continuous_ij_slice)
-        Z[:, problem.integer_ij_slice] = ij_x_for_j.reshape(Z[:, problem.integer_ij_slice].shape)
-        Z[:, problem.continuous_ij_slice] = ij_f_for_j.reshape(Z[:, problem.continuous_ij_slice].shape)
-        _supplies_j = np.sum(Z[:, problem.continuous_ij_slice].reshape(Z.shape[0], -1, num_sorting), axis = 1)[:,:,np.newaxis]
+        ij_x_for_j = np.ceil(ij_f_for_j/problem._parameters.maximum_amount_transport[0]).astype(int)
+        _supplies_j = np.sum(ij_f_for_j, axis = 1)
         _jk_kp_f_for_j = _create_link_k_kp(Z, problem.continuous_jk_slice, problem.continuous_jkp_slice)
         _jk_kp_x_for_j = _create_link_k_kp(Z, problem.integer_jk_slice, problem.integer_jkp_slice)
-        _jk_kp_f_for_j, _jk_kp_x_for_j = self._add_zeroes(Z, problem.binary_end_facility_slice, _supplies_j, continuous_for_j = _jk_kp_f_for_j, integer_for_j = _jk_kp_x_for_j)
+        _jk_kp_f_for_j, _jk_kp_x_for_j = self._add_zeroes(Z, problem.binary_end_facility_slice, _supplies_j[:,:,np.newaxis], continuous_for_j = _jk_kp_f_for_j, integer_for_j = _jk_kp_x_for_j)
+        _jk_kp_x_for_j = np.ceil(_jk_kp_f_for_j/problem._parameters.maximum_amount_transport[1]).astype(int)
         Z = _split_and_override(Z, problem.continuous_jk_slice, problem.continuous_jkp_slice, _jk_kp_f_for_j)
         Z = _split_and_override(Z, problem.integer_jk_slice, problem.integer_jkp_slice, _jk_kp_x_for_j)
-        
+        Z[:, problem.integer_ij_slice] = ij_x_for_j.reshape(Z[:, problem.integer_ij_slice].shape)
+        Z[:, problem.continuous_ij_slice] = ij_f_for_j.reshape(Z[:, problem.continuous_ij_slice].shape)
         return pop.set("X", Z)
 
-        
+
+
 
 class Minimize():
     """
@@ -726,7 +698,7 @@ class Minimize():
                 population_size : int = 100, 
                 reference_directions : pymoo.util.reference_direction = [],
                 verbose = True, 
-                algorithm : str = 'nsga3',  #nsga2, nsga3, unsga3, rnsga3, moead, ctaea 
+                algorithm : str = 'nsga3',  #nsga2, nsga3, unsga3, rnsga3, moead, ctae 
                 seed = 1):
         """
         The function `__init__` is a constructor for the class `Minimize`. It takes in the problem,
@@ -770,16 +742,6 @@ class Minimize():
                     mutation = self.mutation,
                     repair = RepairGraph(),
                     eliminate_duplicates = True)
-        elif self._algorithm == 'moead':
-            print(f"Number of reference directions: {len(self._ref_dir)}")
-            algorithm = MOEAD(
-                    ref_dirs = self._ref_dir,
-                    n_neighbors=15,
-                    prob_neighbor_mating=0.7,
-                    sampling = self.sampling,
-                    crossover = self.crossover,
-                    mutation = self.mutation,
-                    repair = RepairGraph())
         elif self._algorithm == "ctae":
             print(f"Number of reference directions: {len(self._ref_dir)}")
             algorithm = CTAEA(ref_dirs=self._ref_dir,
@@ -788,6 +750,13 @@ class Minimize():
                             mutation = self.mutation,
                             repair = RepairGraph(),
                             eliminate_duplicates = True)
+        elif self._algorithm == "moead":
+            print(f"Number of reference directions: {len(self._ref_dir)}")
+            algorithm = MOEAD(ref_dirs = self._ref_dir,
+                            sampling = self.sampling,
+                            crossover = self.crossover,
+                            mutation = self.mutation,
+                            repair = RepairGraph())
         elif self._algorithm == "agemoea":
             algorithm = AGEMOEA(pop_size = self._pop_size,
                             sampling = self.sampling,
@@ -818,7 +787,7 @@ class Minimize():
         """
         algorithm = self.select_algorithm()
         print(f"Running {self._algorithm.upper()} heuristic...")
-        self._problem = ConstraintsAsPenalty(self._problem, penalty=1e10)
+        self._problem = ConstraintsAsPenalty(self._problem, penalty=1e6)
         res = minimize(self._problem,
             algorithm,
             self._termination,
@@ -829,7 +798,7 @@ class Minimize():
         
         return res
 
-    def _create_mixed_variables(self):
+    def _create_mixed_variables(self, crossover_probs : list = [0.7, 0.6, 0.6], mutation_probs : list = [0.01, 0.01, 0.01]):
         """
          We create a mixed variable sampling, crossover, and mutation function that uses the
         `bin_random`, `int_random`, and `real_random` sampling functions, the `bin_hux`, `int_sbx`, and
@@ -837,7 +806,7 @@ class Minimize():
         functions
         :return: The sampling, crossover, and mutation methods for the mixed variables.
         """
-        _num_facilities = len(self._problem._parameters.sorting_facilities) + len(self._problem._parameters.incinerator_facilities) + len(self._problem._parameters.landfill_facilities)
+        # _num_facilities = len(self._problem._parameters.sorting_facilities) + len(self._problem._parameters.incinerator_facilities) + len(self._problem._parameters.landfill_facilities)
         _mask_binary = np.array(["bin" for _ in range(self._problem.num_binary_vars)])
         _mask_integer = np.array(["int" for _ in range(self._problem.num_integer_vars)])
         _mask_continuous = np.array(["real" for _ in range(self._problem.num_continuous_vars)])
@@ -849,15 +818,16 @@ class Minimize():
         })
 
         _crossover = MixedVariableCrossover(_masks, {
-            "bin": get_crossover("bin_k_point", n_points = _num_facilities),
-            "int": get_crossover("int_k_point", n_points = 1, prob=0.4),
-            "real": CustomCrossover(n_points = 1, prob = 0.4)
+            "bin": CustomBinaryPointCrossover(n_points = 1,  prob = crossover_probs[0]),
+            # "bin": get_crossover("bin_k_point",n_points = 1, prob = crossover_probs[0]),
+            "int": get_crossover("int_k_point", n_points = 1, prob= crossover_probs[1]),
+            "real": CustomRealPointCrossover(n_points = 1, prob = crossover_probs[2])
         })
 
         _mutation = MixedVariableMutation(_masks, {
-            "bin": get_mutation("bin_bitflip"),
-            "int": get_mutation("int_pm"),
-            "real": CustomMutation(eta = 20)
+            "bin": CustomBinaryBitflipMutation(prob = mutation_probs[0]),
+            "int": get_mutation("int_pm", prob = mutation_probs[1]),
+            "real": CustomMutation(eta = 20, prob = mutation_probs[2])
         })
         return _sampling, _crossover, _mutation
 if __name__ == "__main__":

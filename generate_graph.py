@@ -21,7 +21,8 @@ class Graph():
                 baseline: bool = False, 
                 plot_graph : bool = False, 
                 seed : IntFloat = 1,
-                baseline_scaler : int = 3) -> None:
+                baseline_scaler : int = 3,
+                locations : tuple = None) -> None:
         """
         Graph constructor Public access to G (Networkx graph), special_locations
         (dict), supplies (dict), demands (dict), custom_parameters (dict),
@@ -54,7 +55,7 @@ class Graph():
         self._city_supplies = dict()
         self._demand_ranges = (20,80)
         self._supply_ranges = (10,40)
-        self._locations = tuple()
+        self._locations = locations
         if baseline: 
             self._value_strings = ['J','K',"K'"]
             self.collection_locations = list()
@@ -67,6 +68,7 @@ class Graph():
         self.node_translator= dict() #key = node location : value = node number
         self.G = None
         np.random.seed(seed)
+        random.seed(seed)
         self.create_graph(plot_graph=plot_graph)
     def add_custom_parameter(self, 
                     name: StrInt,
@@ -193,16 +195,16 @@ class Graph():
                 attr = kv[1]
                 self.node_translator.update({node: index_displaced + 1})
                 if 'K' in attr:
-                    node_colours[index_displaced] = ["Incinerator Candidate", '#952E25']
+                    node_colours[index_displaced] = ["Incinerator Candidate", '#952E25','square']
                 elif "K'" in attr:
-                    node_colours[index_displaced] = ["Landfill Candidate", '#00C0F0']
+                    node_colours[index_displaced] = ["Landfill Candidate", '#00C0F0','octagon']
                 elif 'J' in attr:
-                    node_colours[index_displaced] = ["Sorting Candidate", '#6AC46A']
+                    node_colours[index_displaced] = ["Sorting Candidate", '#6AC46A', "triangle-up"]
                 custom_node_attrs[index_displaced] = f"Node: {index_displaced+1} Attr: {node_colours[index_displaced][0]}"
             for ix in range(0,len(self.collection_locations)):
                 node = self.collection_locations[ix]
                 self.node_translator.update({node: ix + 1})
-                node_colours[ix] = ["Collection Center", '#D7D2CB']
+                node_colours[ix] = ["Collection Center", '#D7D2CB', 'circle']
                 custom_node_attrs[ix] = f"Node: {ix+1} Attr: {node_colours[ix][0]} <br> Unsorted Supply: {self.supplies[node][0]} <br> Sorted Supply: {self.supplies[node][1]}"
 
         fig = go.Figure(layout=go.Layout(
@@ -222,9 +224,7 @@ class Graph():
                             borderwidth=2
                         ),
                         annotations=[ dict(
-                                text=f" <b>Total Demand:</b> {sum(self.demands.values())}" + \
-                                    f"<br> <b>Total Unsorted Supply:</b> {np.round(sum([us for us,_  in self.supplies.values()]), 3)}" + \
-                                    f"<br> <b>Total Sorted Supply:</b> {sum([s for _, s in self.supplies.values()])} ",
+                                text=f"<b>Total Unsorted Supply:</b> {np.round(sum([us for us,_  in self.supplies.values()]), 3)}",
                                 showarrow=False,
                                 align = 'left',
                                 # xref="paper", yref="paper",
@@ -264,6 +264,7 @@ class Graph():
                 fig.add_trace(go.Scatter(
                     x=temp_x, y=temp_y,
                     mode='markers',
+                    marker_symbol = node_colours[i][2],
                     hoverinfo='text',
                     text = temp_attr,
                     name=f"{node_colours[i][0]}",
@@ -371,14 +372,8 @@ class Graph():
             return _populations
         # TODO: create same graph locations/supplies for both baseline and new versions (ofc after finishing the baseline)
         self.G = nx.DiGraph()
-        # Create random points in range 0 - 100.
-        pts = 100*np.random.random((self._number_of_cities*20,2))
-        # Apply K-means to the random points.
-        if self._baseline: scaler = self._scaler
-        else: scaler = 1
-        kmean = KMeans(n_clusters=self._number_of_cities*scaler).fit(pts)
-        # The centroids are the nodes of the cities, as such they are spaced out.
-        self._locations = tuple(map(tuple,kmean.cluster_centers_.astype(int)))
+        if self._locations is None:
+            self._locations = tuple(map(tuple,100*np.random.random((self._number_of_cities*4,2))))
         # Get the distance for all cities between all cities as our cost edges.
         for i in range(len(self._locations)):
             for j in range(len(self._locations)):
@@ -396,14 +391,13 @@ class Graph():
             self.special_locations, self.demands = _create_special_locations(special_nodes, self._value_strings)
         elif self._baseline:
             # Creating a list of the collection locations, and then creating a list of the special locations.
-            self.collection_locations = [self._locations[i] for i in range(0,self._number_of_cities)]
-            special_cities = [self._locations[i] for i in range(self._number_of_cities, len(self.G.nodes))]
+            nodes = [i for i in range(len(self.G.nodes))]
+            self.collection_locations = [self._locations[i] for i in nodes[:self._number_of_cities]]
+            special_cities = nodes[self._number_of_cities:len(self.G.nodes)]
             splits = []
             _temp = []
-            difference = (len(self.G.nodes) - self._number_of_cities)%3
-            for ix in range(self._number_of_cities,len(self.G.nodes)):
-                if ix > len(self.G.nodes) - difference - 1 and difference != 0: splits[np.random.randint(0,3)].append(ix)
-                else: _temp.append(ix)
+            for ix in special_cities:
+                _temp.append(ix)
                 if len(_temp) == int(len(special_cities)/3): splits.append(_temp); _temp = []
             self.special_locations, self.demands = _create_special_locations(splits, self._value_strings)
             for loc in self.collection_locations:
@@ -413,8 +407,7 @@ class Graph():
         self.city_sizes = _generate_city_sizes()
         # If plot_graph = True. We create a plot of the generated graph
         if plot_graph:
-            figure = self.plot_graph()
-            figure.show()
+            self.random_graph_figure = self.plot_graph()
 if __name__ == "__main__":
     RG = Graph(12,[2,2,11])
     Graph = RG.create_graph(plot_graph=True)

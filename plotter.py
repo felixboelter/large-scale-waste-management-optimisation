@@ -1,8 +1,8 @@
 from plotly import graph_objs as go
 from typing import TypeVar, Dict,List, Any, Union, Tuple, Optional
-import ast
 import networkx as nx
 from parameters import Parameters
+import numpy as np
 
 class Plotter():
     def __init__(self, parameters : Parameters, solved_graph : nx.DiGraph, facility_sizes : dict) -> None:
@@ -59,7 +59,6 @@ class Plotter():
 
         CATEGORIES = 3
         VALUES = [0, 40, 60, 101]
-        # if figure_name == None: figure_name= f"Solved solution for objective: {self.minimization}"
         fig = go.Figure(layout=go.Layout(
                         title=figure_name,
                         title_x = 0.5,
@@ -92,36 +91,78 @@ class Plotter():
             fig.add_trace(go.Scatter(
                 x=x_edges, 
                 y=y_edges,
-                showlegend=True,
+                showlegend=False,
+                legendgroup=name,
                 name= name,
                 line = dict(
                     color = colors,
                     width = widths),
                 hoverinfo='none',
                 mode='lines'))
+        dummy_edges_colours = ["#DF4E4F", '#FDB813', '#4E9B47']
+        dummy_edge_names = ["Distance > 60", "Distance > 40", "Distance < 40"]
+        dummy_widths = [1,2,4]
+        for i in range(len(dummy_edge_names)):
+            fig.add_trace(go.Scatter(
+                x=[0,0,None],
+                y=[0,0,None],
+                showlegend = True,
+                legendgroup=dummy_edge_names[i],
+                name = dummy_edge_names[i],
+                line = dict(
+                    color = dummy_edges_colours[i],
+                    width=dummy_widths[i]),
+                hoverinfo='none',
+                mode='lines'))
+        dummy_node_colours = ["#D7D2CB", '#6AC46A', '#952E25', '#00C0F0']
+        dummy_marker_symbols = ['circle', 'triangle-up', 'square', 'octagon']
+        dummy_node_names = ["Collection Center", "Sorting Facility", "Incinerator Facility", 'Landfill Facility']
+        for i in range(len(dummy_node_names)):
+            fig.add_trace(go.Scatter(
+                x=[0], y=[0.0],
+                mode='markers',
+                marker_symbol = dummy_marker_symbols[i],
+                hoverinfo='none',
+                showlegend = True,
+                name = dummy_node_names[i],
+                legendgroup = dummy_node_names[i],
+                visible="legendonly",
+                marker=dict(
+                    color=dummy_node_colours[i],
+                    size=20,
+                    line_width=2)))
         _node_colours = dict()
         _custom_node_attrs = dict()
+        _node_sizes = dict()
         dictionary_values = {0 : "Small", 1: "Medium", 2 : "Large"}
         for node in self._solved_graph.nodes():
             node_name = self._parameters.G.node_translator[node]
+            
             if node in self._parameters.G.collection_locations: 
-                _node_colours[node] = ["Collection Center", '#D7D2CB']
+                _node_colours[node] = ["Collection Center", '#D7D2CB', 'circle']
                 _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Unsorted Supply: {self._parameters.G.supplies[node][0]}"
             elif node in self._parameters.sorting_facilities: 
-                _node_colours[node] = ["Sorting Facility", '#6AC46A']
+                _node_colours[node] = ["Sorting Facility", '#6AC46A', 'triangle-up']
                 _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(self._facility_sizes[node_name])]}"
+                _node_sizes[node] = dictionary_values[int(self._facility_sizes[node_name])]
+
             elif node in self._parameters.incinerator_facilities: 
-                _node_colours[node] = ["Incinerator Facility", '#952E25']
+                _node_colours[node] = ["Incinerator Facility", '#952E25', 'square']
                 _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(self._facility_sizes[node_name])]}"
+                _node_sizes[node] = dictionary_values[int(self._facility_sizes[node_name])]
+
             elif node in self._parameters.landfill_facilities: 
-                _node_colours[node] = ["Landfill Facility", '#00C0F0']
+                _node_colours[node] = ["Landfill Facility", '#00C0F0','octagon']
                 _custom_node_attrs[node] = f"Node: {node_name} Attr: {_node_colours[node][0]} <br> Size: {dictionary_values[int(self._facility_sizes[node_name])]}"
-        
+                _node_sizes[node] = dictionary_values[int(self._facility_sizes[node_name])]
+
         seen_node_colours = []
+        _frontend_sizes = {0 : 15, 1: 20, 2: 25}
         for node in self._solved_graph.nodes():
             if _node_colours[node] not in seen_node_colours:
                 temp_x = []
                 temp_y = []
+                temp_xy = []
                 temp_attr = []
                 current_node_colour = _node_colours[node]
                 seen_node_colours.append(current_node_colour)
@@ -129,15 +170,38 @@ class Plotter():
                     if value == current_node_colour:
                         temp_x.append(key[0])
                         temp_y.append(key[1])
+                        temp_xy.append(key)
                         temp_attr.append(_custom_node_attrs[key])
-                fig.add_trace(go.Scatter(
-                    x=temp_x, y=temp_y,
-                    mode='markers',
-                    hoverinfo='text',
-                    text = temp_attr,
-                    name=f"{current_node_colour[0]}",
-                    marker=dict(
-                        color=current_node_colour[1],
-                        size=20,
-                        line_width=2)))
+                if node in list(_node_sizes.keys()):
+                    mask_small = [_node_sizes[xy] == dictionary_values[0] for xy in temp_xy]
+                    mask_medium = [_node_sizes[xy] == dictionary_values[1] for xy in temp_xy]
+                    mask_large = [_node_sizes[xy] == dictionary_values[2] for xy in temp_xy]
+                    for i, mask in enumerate([mask_small, mask_medium, mask_large]):
+                        fig.add_trace(go.Scatter(
+                            x=np.array(temp_x)[mask], y=np.array(temp_y)[mask],
+                            mode='markers',
+                            marker_symbol = current_node_colour[2],
+                            hoverinfo='text',
+                            showlegend = False,
+                            text = np.array(temp_attr)[mask],
+                            name=f"{current_node_colour[0]}",
+                            legendgroup = current_node_colour[0],
+                            marker=dict(
+                                color=current_node_colour[1],
+                                size=_frontend_sizes[i],
+                                line_width=2)))
+                else:    
+                    fig.add_trace(go.Scatter(
+                        x=temp_x, y=temp_y,
+                        mode='markers',
+                        marker_symbol = current_node_colour[2],
+                        hoverinfo='text',
+                        showlegend = False,
+                        text = temp_attr,
+                        name=f"{current_node_colour[0]}",
+                        legendgroup = current_node_colour[0],
+                        marker=dict(
+                            color=current_node_colour[1],
+                            size=20,
+                            line_width=2)))
         return fig

@@ -15,6 +15,34 @@ from plotter import Plotter
 
 FND = TypeVar("FND", float, np.ndarray)
 
+def create_subplot(figures,num_rows,num_cols, plot_names):
+    total_fig = make_subplots(rows = num_rows, cols = num_cols, shared_xaxes= False,start_cell="top-left", subplot_titles=plot_names,vertical_spacing=0.1, horizontal_spacing=0.1)
+    col_num = 1
+    row_num = 1
+    for idx, fig in enumerate(figures):
+        if col_num > 2:
+            row_num = 2
+            col_num = 1
+        for item in fig['data']:
+            if idx > 0: item['showlegend'] = False
+            total_fig.add_trace(item, row = row_num, col = col_num)
+        col_num +=1
+    return total_fig
+
+def create_solved_graph(df_X, df_solved_model, solved_graph):
+    dataframe_X = pd.concat([df_X, df_solved_model], axis = 1)
+    df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values if round(value) > 0]
+    _data_locations = [key for key, _ in df_solved_model_list]
+    # Get the distance for all cities between all cities as our cost edges.
+    for i in range(len(_data_locations)):
+        if 'f' in _data_locations[i]:
+            first_node = ast.literal_eval(_data_locations[i][1])
+            second_node = ast.literal_eval(_data_locations[i][2])
+            # Eucledian distance calculation.
+            distance = np.round(((first_node[0] - second_node[0])**2 + (first_node[1] - second_node[1])**2)**0.5)
+            # Add the edge to a graph with the distance as an edge weight.
+            solved_graph.add_edge(first_node, second_node, weight=distance)
+    return solved_graph, dataframe_X, df_solved_model_list, _data_locations
 class Model_Baseline():
     """
     Class Model_Baseline, inherits Parameters.
@@ -75,7 +103,7 @@ class Model_Baseline():
         self._x_jkp = {(j,kp) : self.model.integer_var(name=f'x_{j}_{kp}') for j,kp,_ in self._jkp_list}
         self._f_ij = {(i,j) : self.model.continuous_var(name=f'f_{i}_{j}') for i,j,_ in self._ij_list}
         self._f_jk_kp = {(j,k_kp) : self.model.continuous_var(name=f'f_{j}_{k_kp}') for j,k_kp,_ in self._jk_list+self._jkp_list}
-
+        
     def _create_constraints(self) -> None:
         """
         Private function. Creates the constraints used by the model.
@@ -163,8 +191,6 @@ class Model_Baseline():
                 self.model.add_constraint(self.model.sum(y_variable[(i,l)] for l in self._parameters._range_of_facility_sizes) <= 1)
         
         _ij_for_i_dict = _dictionary_array(self._ij_list)
-        _jk_for_j_dict = _dictionary_array(self._jk_list)
-        _jkp_for_j_dict = _dictionary_array(self._jkp_list)
         _jk_kp_for_j_dict = _dictionary_array(self._jk_list + self._jkp_list)
         # Inverse dictionaries
         _ij_for_j_dict = _dictionary_array(self._ij_list,inverse=True)
@@ -349,21 +375,25 @@ class Model_Baseline():
         """
         if not isinstance(list_of_functions, list): list_of_functions = [list_of_functions]
         self.model.parameters.mip.tolerances.mipgap = 0.000
+        self.model.parameters
         df = pd.DataFrame(columns=["Objective Name","Cost Objective", "Land Usage Objective", "Health Impact Objective"])
-        model_df = pd.DataFrame()
+        total_fig = None
+        single_df_X = pd.DataFrame()
         _figs = []
         log = False
         if self._verbose: log=True
+        total_time = 0
         minimization_names = []
-        for minimize_function in list_of_functions:
+        for i, minimize_function in enumerate(list_of_functions):
             minimize_function()
+            if i == 0: self.model.print_information()
             minimization_names.append(self.minimization)
-            self.model.print_information()
             tic = time.perf_counter()
             self.solved_model = self.model.solve(clean_before_solve=True, log_output = log)
             toc = time.perf_counter()
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
             time_spent = toc - tic
+            total_time += time_spent
             print(f"Elapsed time for {self.minimization} was {time_spent:0.4f} seconds")
             if self._verbose:
                 self.solved_model.display()
@@ -371,43 +401,20 @@ class Model_Baseline():
             self.model.remove_objective()
             self.solved_graph = nx.DiGraph()
             df_solved_model = self.solved_model.as_df(name_key = self.minimization)
-            model_df = pd.concat([model_df,df_solved_model], axis=1)
-            self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values if round(value) > 0]
-            self._data_locations = [key for key, _ in self.df_solved_model_list]
-            # Get the distance for all cities between all cities as our cost edges.
-            for i in range(len(self._data_locations)):
-                if 'f' in self._data_locations[i]:
-                    first_node = ast.literal_eval(self._data_locations[i][1])
-                    second_node = ast.literal_eval(self._data_locations[i][2])
-                    # Eucledian distance calculation.
-                    distance = np.round(((first_node[0] - second_node[0])**2 + (first_node[1] - second_node[1])**2)**0.5)
-                    # Add the edge to a graph with the distance as an edge weight.
-                    self.solved_graph.add_edge(first_node, second_node, weight=distance)
-            df = self.create_dataframe(df)
+            self.solved_graph, single_df_X, df_solved_model_list, _data_locations = create_solved_graph(single_df_X, df_solved_model, self.solved_graph)
+            df = self.create_dataframe(df, df_solved_model_list)
             if self._plot_graph: 
-                _facility_sizes = {self._parameters.G.node_translator[ast.literal_eval(key[1])]:key[2] for key in self._data_locations if 'y' in key}
+                _facility_sizes = {self._parameters.G.node_translator[ast.literal_eval(key[1])]:key[2] for key in _data_locations if 'y' in key}
                 plotting = Plotter(self._parameters, self.solved_graph, _facility_sizes)
                 _figs.append(plotting.plot_graph())
         if self._plot_graph:
             if len(list_of_functions) == 1:
                 _figs[0].show()
-                return df
+                return total_time, df, single_df_X, _figs[0]
             _num_rows = round(len(list_of_functions)/2)
             _num_cols = (len(list_of_functions)//2) + 1
-            _total_fig = make_subplots(rows = _num_rows, cols = _num_cols, shared_xaxes= False,start_cell="top-left", subplot_titles=minimization_names,vertical_spacing=0.1, horizontal_spacing=0.1)
-            col_num = 1
-            row_num = 1
-            for idx, fig in enumerate(_figs):
-                if col_num > 2:
-                    row_num = 2
-                    col_num = 1
-                for item in fig['data']:
-                    if idx > 0: item['showlegend'] = False
-                    _total_fig.add_trace(item, row = row_num, col = col_num)
-                col_num +=1
-            _total_fig.show()
-        return model_df, df
-    
+            total_fig = create_subplot(_figs, _num_rows, _num_cols,minimization_names)
+        return total_time, df, single_df_X, total_fig
     def _calculate_cost(self, y_decisions : List[Tuple[Any, int]], x_decisions : Dict[tuple, Any]) -> Tuple[float, float]:
         """
         For each facility, if it is a sorting facility, add the opening cost of a sorting facility to
@@ -486,7 +493,7 @@ class Model_Baseline():
                 transport_health_impact += population_for_edge[(i,j)] * daly_for_edge[(i,j)][1] * x_decisions[(i,j)] 
         return (transport_health_impact, facility_health_impact)
 
-    def create_dataframe(self, df : pd.DataFrame, name : Optional[str] = None) -> pd.DataFrame:
+    def create_dataframe(self, df : pd.DataFrame, df_solved_model_list : list, name : Optional[str] = None) -> pd.DataFrame:
         """
         This function takes in a dataframe and a name, and returns a dataframe with the name and the
         objective values of the model
@@ -500,8 +507,8 @@ class Model_Baseline():
         self._ij_data = [(i,j,w['weight']) for i, j, w in self.solved_graph.edges(data=True) if i in self._parameters.G.collection_locations and j in self._parameters.sorting_facilities]
         self._jk_data = [(j,k,w['weight']) for j, k, w in self.solved_graph.edges(data=True) if (j in self._parameters.sorting_facilities and k in self._parameters.incinerator_facilities)]
         self._jkp_data = [(j,kp,w['weight']) for j, kp, w in self.solved_graph.edges(data=True) if (j in self._parameters.sorting_facilities and kp in self._parameters.landfill_facilities)]
-        _y_decisions = [(ast.literal_eval(key[1]), int(key[2])) for key, _ in self.df_solved_model_list if 'y' in key]
-        _x_decisions = {(ast.literal_eval(key[1]), ast.literal_eval(key[2])): value for key, value in self.df_solved_model_list if 'x' in key}
+        _y_decisions = [(ast.literal_eval(key[1]), int(key[2])) for key, _ in df_solved_model_list if 'y' in key]
+        _x_decisions = {(ast.literal_eval(key[1]), ast.literal_eval(key[2])): value for key, value in df_solved_model_list if 'x' in key}
         _cost_objective : Tuple[float, float] = self._calculate_cost(_y_decisions, _x_decisions)
         _land_objective : float = self._calculate_land_usage(_y_decisions)
         _health_objective : Tuple[float, float] = self._calculate_health_impact(_y_decisions, _x_decisions)
@@ -603,21 +610,25 @@ class Multiobjective_model(Model_Baseline):
         if verbose: log=True
         all_double_combinations = list(combinations([i for i in range(0,len(self._optimal_values))], 2))
         if len(self._optimal_values) == 3: all_double_combinations.insert(0,(0,1,2))
-        for combination in all_double_combinations:  
+        total_time = 0
+        multi_dataframe_X = pd.DataFrame()
+        total_fig = None
+        self.model.parameters.mip.tolerances.mipgap = 0.000
+        for i,combination in enumerate(all_double_combinations):  
             self.model.minimize(self._z)
             self._create_multi_constraints(combination)
-            self.model.print_information()
+            if i == 0: self.model.print_information()
             self.model.round_solution = True
             tic = time.perf_counter()
             self.solved_model = self.model.solve(clean_before_solve=True,log_output=log)
             toc = time.perf_counter()
-
             assert self.solved_model, {f"Solution could not be found for this model. Got {self.solved_model}."}
             _name = ""
             for idx, comb in enumerate(combination):
                 if idx < len(combination)-1 : _name += f"{_get_key(self.column_dict, comb)}, "
                 else: _name += f"and {_get_key(self.column_dict, comb)}"
             print(f"Elapsed time for {_name} was {toc - tic:0.4f} seconds")
+            total_time += toc - tic
             if verbose:
                 print(self.model.solve_details)
                 self.solved_model.display()
@@ -625,24 +636,11 @@ class Multiobjective_model(Model_Baseline):
             self._remove_multi_constraints(combination)
             self.solved_graph = nx.DiGraph()
             df_solved_model = self.solved_model.as_df()
-            self.df_solved_model_list = [(key.split('_'), value) for key, value in df_solved_model.values if round(value) > 0]
-            self._data_locations = [key for key, _ in self.df_solved_model_list]
-            
-            # Get the distance for all cities between all cities as our cost edges.
-            for i in range(len(self._data_locations)):
-                if 'f' in self._data_locations[i]:
-                    first_node = ast.literal_eval(self._data_locations[i][1])
-                    second_node = ast.literal_eval(self._data_locations[i][2])
-                    # Eucledian distance calculation.
-                    distance = np.round(((first_node[0] - second_node[0])**2 + (first_node[1] - second_node[1])**2)**0.5)
-                    # Add the edge to a graph with the distance as an edge weight.
-                    self.solved_graph.add_edge(first_node, second_node, weight=distance)
-            
-            self.org_df = self.create_dataframe(self.org_df, name = _name)
+            self.solved_graph, multi_dataframe_X, df_solved_model_list, _data_locations = create_solved_graph(multi_dataframe_X, df_solved_model, self.solved_graph)
+            self.org_df = self.create_dataframe(self.org_df, df_solved_model_list, name = _name)
             plot_names.append(_name)
-
             if plot_graph: 
-                _facility_sizes = {self._parameters.G.node_translator[ast.literal_eval(key[1])]:key[2] for key in self._data_locations if 'y' in key}
+                _facility_sizes = {self._parameters.G.node_translator[ast.literal_eval(key[1])]:key[2] for key in _data_locations if 'y' in key}
                 plotting = Plotter(self._parameters, self.solved_graph, _facility_sizes)
                 _figures.append(plotting.plot_graph(f"Solution for {_name}"))
         self.org_df.set_index('Objective Name', inplace=True)
@@ -650,20 +648,9 @@ class Multiobjective_model(Model_Baseline):
             _num_of_cols_rows = len(all_double_combinations)//2
             if _num_of_cols_rows == 0: 
                 _figures[0].show()
-                return self.org_df
-            _total_fig = make_subplots(rows = _num_of_cols_rows, cols = _num_of_cols_rows, shared_xaxes= False, start_cell="top-left", subplot_titles=plot_names, vertical_spacing=0.1, horizontal_spacing=0.1)
-            col_num = 1
-            row_num = 1
-            for idx, fig in enumerate(_figures):
-                if col_num > _num_of_cols_rows: 
-                    col_num = 1
-                    row_num = 2
-                for item in fig['data']:
-                    if idx > 0: item['showlegend'] = False
-                    _total_fig.add_trace(item, row = row_num, col = col_num)
-                col_num += 1
-            _total_fig.show()
-        return self.org_df
+                return total_time, self.org_df, multi_dataframe_X, _figures[0]
+            total_fig = create_subplot(_figures, _num_of_cols_rows, _num_of_cols_rows, plot_names)
+        return total_time, self.org_df, multi_dataframe_X, total_fig
 
 if __name__ == '__main__':
     set_seed = 0
