@@ -370,7 +370,6 @@ class Graph():
                 random_number = (((length_value**2)*POPULATION_SCALE)*np.random.random_sample()) + _populations[key]
                 _populations.update({key : round(random_number)})
             return _populations
-        # TODO: create same graph locations/supplies for both baseline and new versions (ofc after finishing the baseline)
         self.G = nx.DiGraph()
         if self._locations is None:
             self._locations = tuple(map(tuple,100*np.random.random((self._number_of_cities*4,2))))

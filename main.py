@@ -176,7 +176,7 @@ class Run():
         results_X = np.array([])
         total_times = dict()
         for i, algo in enumerate(self.algorithms):
-            minimization = Minimize(problem = self.problem, population_size = population_size, reference_directions = ref_dirs, termination=termination, verbose = self._verbose, algorithm=algo, seed = seed)
+            minimization = Minimize(problem = self.problem, population_size = population_size, reference_directions = ref_dirs, termination=termination, verbose = self._verbose, algorithm=algo, seed = seed, crossover_probs = self._crossover_probs, mutation_probs = self._mutation_probs)
             result = minimization.minimize_heuristic()
             print(f'Time for {algo.upper()} heuristic: {result.exec_time}')
             total_times.update({i: result.exec_time})
@@ -333,7 +333,7 @@ class Run():
         _total_fig.for_each_trace(lambda trace: trace.update(showlegend=False) if (trace.name in names) else names.add(trace.name))
         return _total_fig
 
-    def main(self,range_of_cities : range, range_of_instances : range, seeds : list, cplex : bool = True):
+    def main(self,range_of_cities : range, range_of_instances : range, seeds : list, crossover_probs : list = [0.8, 0.8, 0.8], mutation_probs : list = [0.01,0.01,0.01], cplex : bool = True):
         """
         The function generates random instances of a graph, and then runs the CPLEX MILP solver on the
         instances, and then runs the heuristic on the instances.
@@ -347,6 +347,8 @@ class Run():
         :param cplex: If you want to run the CPLEX solver, defaults to True
         :type cplex: bool (optional)
         """
+        self._crossover_probs = crossover_probs
+        self._mutation_probs = mutation_probs
         randominstances_path = os.path.join(os.getcwd(), "RandomInstances")
         if os.path.exists(randominstances_path): instances = self.load_instances("RandomInstances", "instances")
         else: instances = self.generate_instances("RandomInstances", "instances")
@@ -361,7 +363,10 @@ class Run():
                 city_path = os.path.join(results_path, f"{avg_num_of_cities}_cities")
                 if not os.path.exists(city_path): os.mkdir(city_path)
                 city_results_path = os.path.join(city_path, f"{instance}_{set_seed}")
-                os.mkdir(city_results_path)
+                try: os.mkdir(city_results_path)
+                except OSError: pass
+               
+                print(f"Running Cities: {avg_num_of_cities} on Instance: {instance} with seed: {set_seed}")
                 # Used to suppress scientific notation.
                 np.set_printoptions(suppress=True)
                 if isinstance(self.algorithms, str): self.algorithms = [self.algorithms]
@@ -391,6 +396,9 @@ class Run():
                     normalization_matrix = dataframe_matrix
                 for seed in seeds:
                     seed_path = os.path.join(city_results_path, f"data_{seed}")
+                    try: os.mkdir(seed_path)
+                    except OSError: continue
+                    print(f"Running Seed {seed}...")
                     results_F, results_X, result_lengths, total_times = self.run_heuristic(termination, pop_size, seed)
                     if cplex : normalization_matrix= np.vstack([normalization_matrix, results_F])
                     else: normalization_matrix = results_F
@@ -405,7 +413,6 @@ class Run():
                         self.heuristic_metric.update({i : metrics_for_heuristic[sum_so_far:sum_so_far+result_lengths[i+1]]})
                         self.heuristic_result.update({i : results_F[sum_so_far:sum_so_far+result_lengths[i+1]]})
                     results_df = self.create_heuristic_results(results_df, normalization_matrix, total_times)
-                    os.mkdir(seed_path)
                     results_df.to_csv(os.path.join(seed_path, "results_df.csv"))
                     with open(os.path.join(seed_path, "heuristic_results_F.npy"), 'wb') as f:
                         np.save(f, results_F)
@@ -418,9 +425,13 @@ class Run():
                         subplot_figure.write_html(os.path.join(seed_path, f"heuristic_interactive_{seed}.html"))
 # The code below is solving the multiobjective problem using the heuristic and the model.
 if __name__ == '__main__':
-    list_of_algorithms = ["nsga2","nsga3", "unsga3", "ctae","agemoea", "moead"]
-    list_of_random_seeds =  [37072584, 863683177, 272556303]
+    list_of_algorithms = ["nsga2","nsga3", "unsga3", "ctae","agemoea"]
+    #  
+    list_of_random_seeds =  [37072584, 483957530, 863683177]
     runner = Run(list_of_algorithms, plot_graph= True, verbose= False)
-    runner.main(range(2,13,1),range(1,11),seeds = list_of_random_seeds, cplex=True)
-    runner.main(range(15,105,5),range(1,11), seeds = list_of_random_seeds, cplex=False)
+    # Small problems
+    runner.main(range(11,12,1),range(1,11),seeds = list_of_random_seeds,cplex=True)
+    runner.main(range(15,30,5),range(1,11), seeds = list_of_random_seeds, mutation_probs = [0.005, 0.005, 0.005],cplex=False)
+    runner.main(range(40,10,-10),range(1,11), seeds = list_of_random_seeds, mutation_probs = [0.005, 0.005, 0.005],cplex=False)
+
 

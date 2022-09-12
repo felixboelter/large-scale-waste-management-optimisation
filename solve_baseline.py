@@ -375,7 +375,7 @@ class Model_Baseline():
         :return: A dataframe with the results of the model.
         """
         if not isinstance(list_of_functions, list): list_of_functions = [list_of_functions]
-        self.model.parameters.mip.tolerances.mipgap = 0.000
+        # self.model.parameters.mip.tolerances.mipgap = 0.000
         self.model.parameters
         df = pd.DataFrame(columns=["Objective Name","Cost Objective", "Land Usage Objective", "Health Impact Objective"])
         total_fig = None
@@ -614,7 +614,7 @@ class Multiobjective_model(Model_Baseline):
         total_time = 0
         multi_dataframe_X = pd.DataFrame()
         total_fig = None
-        self.model.parameters.mip.tolerances.mipgap = 0.000
+        # self.model.parameters.mip.tolerances.mipgap = 0.000
         for i,combination in enumerate(all_double_combinations):  
             self.model.minimize(self._z)
             self._create_multi_constraints(combination)

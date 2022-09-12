@@ -22,7 +22,7 @@ from pymoo.core.repair import Repair
 from pymoo.core.crossover import Crossover
 from pymoo.core.mutation import Mutation
 from pymoo.operators.repair.to_bound import set_to_bounds_if_outside_by_problem
-
+import random
 
 class Vectorized_heuristic(Problem):
     def __init__(self, parameters : Parameters, verbose = True, **kwargs) -> None:
@@ -111,7 +111,6 @@ class Vectorized_heuristic(Problem):
         _jk_x_sum_for_k = np.sum(x[:,self.continuous_jk_slice].reshape(x.shape[0],_num_sorting_facilities,-1), axis = 1)
         _jkp_x_sum_for_kp = np.sum(x[:,self.continuous_jkp_slice].reshape(x.shape[0],_num_sorting_facilities,-1), axis = 1)
         _y_incinerator_for_k = x[:,self.binary_incinerator_slice].reshape(x.shape[0],-1,len(self._parameters.facility_storage_capacities[1]))
-        _y_landfill_for_kp = x[:,self.binary_landfill_slice].reshape(x.shape[0],-1,len(self._parameters.facility_storage_capacities[2]))
         _y_landfill_for_kp = x[:,self.binary_landfill_slice].reshape(x.shape[0],-1,len(self._parameters.facility_storage_capacities[2]))
         constraint_5 = _jk_x_sum_for_k - np.sum(_y_incinerator_for_k * self._parameters.facility_storage_capacities[1], axis = 2)
         constraint_6 = _jkp_x_sum_for_kp - np.sum(_y_landfill_for_kp * self._parameters.facility_storage_capacities[2], axis = 2)
@@ -309,6 +308,17 @@ class Elementwise_heuristic(ElementwiseProblem):
         return num_binary_vars,num_integer_vars,num_continuous_vars
 
 
+
+def split_and_override(Z, jk_slice, jkp_slice, _jk_kp_for_j, problem):
+    num_incinerator = len(problem._parameters.incinerator_facilities)
+    num_landfill = len(problem._parameters.landfill_facilities)
+    n_landfills = num_landfill + (int(num_landfill < num_incinerator) * np.abs(num_incinerator - num_landfill + 1))
+    _jk_for_j, _kp0_for_j, _kp_1_for_j = np.dsplit(_jk_kp_for_j, [num_incinerator, n_landfills])
+    _jkp_for_j = np.dstack([_kp0_for_j, _kp_1_for_j])
+    Z[:, jk_slice] = _jk_for_j.reshape(Z[:, jk_slice].shape)
+    Z[:, jkp_slice] = _jkp_for_j.reshape(Z[:, jkp_slice].shape)
+    return Z
+
 class CustomMutation(Mutation):
     def __init__(self, eta, prob=None):
         super().__init__()
@@ -318,12 +328,7 @@ class CustomMutation(Mutation):
             self.prob = float(prob)
         else:
             self.prob = None
-    def _normalize(self, X, num_facilities, link_slice, normalize_supplies):
-            normalize = lambda x_reshaped, in_supplies: x_reshaped/in_supplies
-            # Reshape for j
-            _link_f_for_j = X[:, link_slice].reshape(X.shape[0], -1, num_facilities)
-            _n_link_f_for_j = normalize(_link_f_for_j, normalize_supplies)
-            return _n_link_f_for_j
+    
 
     def _fix_mutation(self, X : np.ndarray, num_facilities : int, _link_slice : slice, normalize_supplies : np.ndarray, mutation_mask : np.ndarray):
         """
@@ -344,10 +349,13 @@ class CustomMutation(Mutation):
         :type mutation_mask: np.ndarray
         :return: the X matrix with the mutated values.
         """
-        
+        normalize = lambda x_reshaped, in_supplies: x_reshaped/in_supplies
+        _link_f_for_j = X[:, _link_slice].reshape(X.shape[0], -1, num_facilities)
         edited_supplies = normalize_supplies.copy()
-        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 100
-        _n_link_f_for_j = self._normalize(X, num_facilities, _link_slice, edited_supplies)
+        if len(edited_supplies[edited_supplies == 0]) > 0: 
+            _link_f_for_j[np.squeeze(edited_supplies == 0, axis = -1)] = 0
+            edited_supplies[edited_supplies == 0] = 1
+        _n_link_f_for_j = normalize(_link_f_for_j, edited_supplies)
         sums = np.sum(_n_link_f_for_j, axis=2)
         sums[sums == 0] = 1
         _n_link_f_for_j /= sums[:,:,np.newaxis]
@@ -427,104 +435,6 @@ class CustomMutation(Mutation):
         return Y
 
 
-
-class CustomRealPointCrossover(Crossover):
-    def __init__(self, n_points, **kwargs):
-        super().__init__(2, 2, **kwargs)
-        self.n_points = n_points
-    def _fix_crossover(self, X : np.ndarray, normalize_supplies : np.ndarray, link_slice : slice, mask : np.ndarray, num_facilities : int) -> np.ndarray:
-        """
-        The function takes the population, and for each individual, it fixes the transport variables
-        that are not part of the original individual, so that they sum to 1.
-        
-        :param X: the current population
-        :type X: np.ndarray
-        :param normalize_supplies: The supplies of the problem normalized to sum to 1
-        :type normalize_supplies: np.ndarray
-        :param link_slice: the slice of the 3d array that contains the transport variables
-        :type link_slice: slice
-        :param inv_mask: a boolean array of shape (2, num_customers, num_facilities)
-        :type inv_mask: np.ndarray
-        :param num_facilities: The number of facilities in the problem
-        :type num_facilities: int
-        :return: The fixed population according to the hard constraints of the problem.
-        """
-
-        normalize = lambda x_reshaped, in_supplies: x_reshaped/in_supplies
-        denormalize = lambda x_reshaped, in_supplies: x_reshaped * in_supplies
-        # Reshape for j
-        _link_f_for_j = X[:,:,link_slice].reshape(X.shape[0], X.shape[1], -1, num_facilities)
-        edited_supplies = normalize_supplies.copy()
-        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 1e6
-        _n_link_f_for_j = normalize(_link_f_for_j, edited_supplies)
-        sums = np.sum(_n_link_f_for_j, axis=3)
-        sums[sums == 0] = 1
-        _n_link_f_for_j /= sums[:,:,:,np.newaxis]
-        _link_f_for_j = denormalize(_n_link_f_for_j, normalize_supplies)
-        X[:,:,link_slice] = _link_f_for_j.reshape(X[:,:,link_slice].shape)
-        return X
-
-    def _do(self, problem, X, **kwargs):
-        """
-        The function creates a mask for each of the three types of facilities (sorting, incineration,
-        and landfill) and then uses that mask to create a new population of children
-        
-        :param problem: the problem instance
-        :param X: the input array of parents
-        :return: The crossover mask is being returned.
-        """
-
-        def crossover_mask(X, M):
-            # convert input to output by flatting along the first axis
-            _X = np.copy(X)
-            _X[0][M] = X[1][M]
-            _X[1][M] = X[0][M]
-            return _X
-        
-        def create_ranges(out_facilities, n_matings, n_var):
-            """
-            Given the number of mating pairs, the number of variables, and the number of output
-            facilities, create a matrix of mating pairs by variables, where each mating pair has a
-            random number of contiguous True values, and the rest are False.
-            
-            :param out_facilities: the number of facilities in the output problem
-            :param n_matings: number of matings
-            :param n_var: the number of variables in the problem
-            :return: A boolean array of size (n_matings, n_var)
-            """
-            
-            in_facilities = n_var//out_facilities
-            new_matings = n_matings * in_facilities
-            r = np.row_stack([np.random.permutation(out_facilities - 1) + 1  for _ in range(new_matings)])[:, :self.n_points]
-            r.sort(axis=1)
-            r = np.column_stack([r, np.full(new_matings, out_facilities)])
-            M = np.full((new_matings, out_facilities), False)
-            # create for each individual the crossover range
-            for i in range(new_matings):
-                j = 0
-                while j < r.shape[1] - 1:
-                    a, b = r[i, j], r[i, j + 1]
-                    M[i, a:b] = True
-                    j += 2
-            M = M.reshape(n_matings, -1)
-            return M
-
-         # get the X of parents and count the matings
-        _, n_matings, n_var = X.shape
-        num_sorting = len(problem._parameters.sorting_facilities) 
-        num_incinerators = len(problem._parameters.incinerator_facilities) 
-        num_landfill = len(problem._parameters.landfill_facilities)
-        _ij_slice = slice(0,len(problem._ij_list))
-        _jk_kp_slice = slice(len(problem._ij_list), n_var)
-        M_ij = create_ranges(num_sorting, n_matings, X[:,:,_ij_slice].shape[2])
-        M_jk_kp = create_ranges(num_incinerators + num_landfill,n_matings, X[:,:,_jk_kp_slice].shape[2])
-        M = np.concatenate([M_ij, M_jk_kp], axis = 1)
-        _X = crossover_mask(X, M)
-        _X = self._fix_crossover(_X, problem.supplies[:, np.newaxis], _ij_slice, M_ij, num_sorting)
-        # Sum over sorting centers
-        supplies_j = np.sum(_X[:,:,_ij_slice].reshape(_X.shape[0], _X.shape[1], -1, num_sorting), axis=2)[:,:,:,np.newaxis]
-        _X = self._fix_crossover(_X, supplies_j, _jk_kp_slice, M_jk_kp, num_incinerators + num_landfill)
-        return _X
 class CustomBinaryBitflipMutation(Mutation):
 
     def __init__(self, prob=None):
@@ -549,19 +459,64 @@ class CustomBinaryBitflipMutation(Mutation):
         _X = _X.reshape(X.shape)
         return _X.astype(np.bool)
 
-class CustomBinaryPointCrossover(Crossover):
-
-    def __init__(self, n_points, **kwargs):
+class CustomPointCrossover(Crossover):
+    def __init__(self, n_points, binary : bool, exploration_prob = 0.05, **kwargs):
         super().__init__(2, 2, **kwargs)
+        self.exploration_prob = exploration_prob
         self.n_points = n_points
+        self.binary = binary
+    def _fix_crossover(self, link_f_for_j : np.ndarray, normalize_supplies : np.ndarray) -> np.ndarray:
+        """
+        The function takes the population, and for each individual, it fixes the transport variables
+        that are not part of the original individual, so that they sum to 1.
+        
+        :param X: the current population
+        :type X: np.ndarray
+        :param normalize_supplies: The supplies of the problem normalized to sum to 1
+        :type normalize_supplies: np.ndarray
+        :param link_slice: the slice of the 3d array that contains the transport variables
+        :type link_slice: slice
+        :param inv_mask: a boolean array of shape (2, num_customers, num_facilities)
+        :type inv_mask: np.ndarray
+        :param num_facilities: The number of facilities in the problem
+        :type num_facilities: int
+        :return: The fixed population according to the hard constraints of the problem.
+        """
+        normalize = lambda x_reshaped, in_supplies: x_reshaped/in_supplies
+        denormalize = lambda x_reshaped, in_supplies: x_reshaped * in_supplies
+        # Reshape for j
+        edited_supplies = normalize_supplies.copy()
+        if len(edited_supplies[edited_supplies == 0]) > 0: 
+            link_f_for_j[np.squeeze(edited_supplies == 0, axis = -1)] = 0
+            edited_supplies[edited_supplies == 0] = 1
+        _n_link_f_for_j = normalize(link_f_for_j, edited_supplies)
+        sums = np.sum(_n_link_f_for_j, axis=3)
+        sums[sums == 0] = 1
+        _n_link_f_for_j /= sums[:,:,:,np.newaxis]
+        link_f_for_j = denormalize(_n_link_f_for_j, normalize_supplies)
+        return link_f_for_j
 
-    def _do(self, _, X, **kwargs):
+    def _do(self, problem, X, **kwargs):
         def crossover_mask(X, M):
             # convert input to output by flatting along the first axis
             _X = np.copy(X)
             _X[0][M] = X[1][M]
             _X[1][M] = X[0][M]
             return _X
+        def _set_cols_to_zero(y_for_facility, find_one_length):
+            population_ix, row_ix = np.where(np.sum(y_for_facility,axis = 2) == find_one_length)
+            y_for_facility_pop = y_for_facility[population_ix, row_ix]
+            find_ones = y_for_facility_pop == 1
+            ones_mat = y_for_facility_pop[find_ones].reshape(-1, find_one_length)
+            # Get columns at random to swap
+            select_ones_cols = np.random.randint(low=0, high=ones_mat.shape[1], size= ones_mat.shape[0]*find_one_length).reshape(-1,find_one_length)
+            select_ones_rows = np.arange(0,ones_mat.shape[0])[:, np.newaxis]
+            ones_mat[select_ones_rows,select_ones_cols] = 0
+            y_for_facility_pop[find_ones] = ones_mat.reshape(-1)
+            y_for_facility[population_ix, row_ix] = y_for_facility_pop
+            return y_for_facility
+        
+        
         # get the X of parents and count the matings
         _, n_matings, n_var = X.shape
 
@@ -583,15 +538,28 @@ class CustomBinaryPointCrossover(Crossover):
                 j += 2
 
         _X = crossover_mask(X, M)
-        y_for_facility = _X.reshape(_X.shape[0]*_X.shape[1], -1, 3)
-        population_ix, row_ix = np.where(np.sum(y_for_facility,axis = 2) > 1)
-        y_for_facility[population_ix, row_ix] = 0
-        _X = y_for_facility.reshape(_X.shape)
+        if self.binary:
+            y_for_facility = _X.reshape(_X.shape[0]*_X.shape[1], -1, 3)
+            y_for_facility = _set_cols_to_zero(y_for_facility,2)
+            y_for_facility = _set_cols_to_zero(y_for_facility,3)
+            _X = y_for_facility.reshape(_X.shape)
+        else:
+            num_sorting = len(problem._parameters.sorting_facilities) 
+            num_incinerators = len(problem._parameters.incinerator_facilities) 
+            num_landfill = len(problem._parameters.landfill_facilities)
+            _ij_slice = slice(0,len(problem._ij_list))
+            _jk_kp_slice = slice(len(problem._ij_list), n_var)
+            f_ij_for_j = X[:,:,_ij_slice].reshape(X.shape[0], X.shape[1], -1, num_sorting)
+            f_ij_for_j = self._fix_crossover(f_ij_for_j, problem.supplies[:, np.newaxis])
+            _X[:,:,_ij_slice] = f_ij_for_j.reshape(X[:,:,_ij_slice].shape)
+            # Sum over sorting centers
+            supplies_j = np.sum(f_ij_for_j, axis=2)[:,:,:,np.newaxis]
+            jk_kp_f_for_j = _X[:,:,_jk_kp_slice].reshape(_X.shape[0], _X.shape[1], num_sorting, num_landfill+num_incinerators)
+            jk_kp_f_for_j = self._fix_crossover(jk_kp_f_for_j, supplies_j)
+            _X[:,:,_jk_kp_slice] = jk_kp_f_for_j.reshape(_X[:,:,_jk_kp_slice].shape)
         return _X
 
 class RepairGraph(Repair):
-
-
     def _add_zeroes(self, 
                     Z : np.ndarray, 
                     binary_slice : slice,
@@ -621,19 +589,25 @@ class RepairGraph(Repair):
         :return: The return value is the new population, with added zeroes.
         """
         normalize = lambda x_4d, in_supplies: x_4d/in_supplies
+        denormalize = lambda x_4d, in_supplies: x_4d * in_supplies
         _binary_for_j = Z[:, binary_slice].reshape(Z.shape[0], -1, 3)
         if not isinstance(integer_for_j, np.ndarray) and not isinstance(continuous_for_j, np.ndarray):
             integer_for_j = Z[:, integer_slice].reshape(Z.shape[0], -1, num_facilities)
             continuous_for_j = Z[:, continuous_slice].reshape(Z.shape[0], -1, num_facilities)
-        edited_supplies = supplies.copy()
-        if len(edited_supplies[edited_supplies == 0]) > 0: edited_supplies[edited_supplies == 0] += (np.sum(edited_supplies)/edited_supplies.size) + 100
-        _norm_continuous_for_j = normalize(continuous_for_j, edited_supplies)
+
+        # Set real and integer columns to zero where binaries are zero
         _indices_binary_zero = np.where(np.sum(_binary_for_j, axis = 2) == 0)
         integer_for_j[_indices_binary_zero[0],:,_indices_binary_zero[1]] = 0
-        _norm_continuous_for_j[_indices_binary_zero[0],:,_indices_binary_zero[1]] = 0
-        integer_for_j[ _norm_continuous_for_j == 0] = 0
-        _norm_continuous_for_j[integer_for_j == 0] = 0
-        denormalize = lambda x_4d, in_supplies: x_4d * in_supplies
+        continuous_for_j[_indices_binary_zero[0],:,_indices_binary_zero[1]] = 0
+        integer_for_j[continuous_for_j == 0] = 0
+        continuous_for_j[integer_for_j == 0] = 0
+        # Avoid divison by 0 error
+        edited_supplies = supplies.copy()
+        if len(edited_supplies[edited_supplies == 0]) > 0: 
+            continuous_for_j[np.squeeze(edited_supplies == 0, axis = -1)] = 0
+            edited_supplies[edited_supplies == 0] = 1
+        # Fix s.t. sum is equal to 1.
+        _norm_continuous_for_j = normalize(continuous_for_j, edited_supplies)
         sums = np.sum(_norm_continuous_for_j, axis = 2)
         sums[sums == 0] = 1
         _norm_continuous_for_j /= sums[:,:,np.newaxis]
@@ -665,7 +639,6 @@ class RepairGraph(Repair):
             return Z
 
         Z = pop.get("X")
-        
         num_sorting = len(problem._parameters.sorting_facilities)
         num_incinerator = len(problem._parameters.incinerator_facilities)
         num_landfill = len(problem._parameters.landfill_facilities)
@@ -676,8 +649,8 @@ class RepairGraph(Repair):
         _jk_kp_x_for_j = _create_link_k_kp(Z, problem.integer_jk_slice, problem.integer_jkp_slice)
         _jk_kp_f_for_j, _jk_kp_x_for_j = self._add_zeroes(Z, problem.binary_end_facility_slice, _supplies_j[:,:,np.newaxis], continuous_for_j = _jk_kp_f_for_j, integer_for_j = _jk_kp_x_for_j)
         _jk_kp_x_for_j = np.ceil(_jk_kp_f_for_j/problem._parameters.maximum_amount_transport[1]).astype(int)
-        Z = _split_and_override(Z, problem.continuous_jk_slice, problem.continuous_jkp_slice, _jk_kp_f_for_j)
-        Z = _split_and_override(Z, problem.integer_jk_slice, problem.integer_jkp_slice, _jk_kp_x_for_j)
+        Z = split_and_override(Z, problem.continuous_jk_slice, problem.continuous_jkp_slice, _jk_kp_f_for_j, problem)
+        Z = split_and_override(Z, problem.integer_jk_slice, problem.integer_jkp_slice, _jk_kp_x_for_j, problem)
         Z[:, problem.integer_ij_slice] = ij_x_for_j.reshape(Z[:, problem.integer_ij_slice].shape)
         Z[:, problem.continuous_ij_slice] = ij_f_for_j.reshape(Z[:, problem.continuous_ij_slice].shape)
         return pop.set("X", Z)
@@ -697,6 +670,8 @@ class Minimize():
                 termination : pymoo.util.termination,
                 population_size : int = 100, 
                 reference_directions : pymoo.util.reference_direction = [],
+                crossover_probs : list = [0.8, 0.8, 0.8],
+                mutation_probs : list = [0.01, 0.01, 0.01],
                 verbose = True, 
                 algorithm : str = 'nsga3',  #nsga2, nsga3, unsga3, rnsga3, moead, ctae 
                 seed = 1):
@@ -717,6 +692,8 @@ class Minimize():
         to True (optional)
         """
         self._problem = problem
+        self._crossover_probs = crossover_probs
+        self._mutation_probs = mutation_probs
         self._pop_size = population_size
         self._ref_dir = reference_directions
         self._termination = termination
@@ -736,6 +713,7 @@ class Minimize():
                     repair = RepairGraph(),
                     eliminate_duplicates = True)
         elif self._algorithm == 'nsga2': 
+            # self.sampling, self.crossover, self.mutation= self._create_mixed_variables(crossover_probs  = [0.8, 0.8, 0.8], mutation_probs = [0.005,0.005,0.005])
             algorithm = NSGA2(pop_size = self._pop_size,
                     sampling = self.sampling,
                     crossover = self.crossover,
@@ -752,6 +730,7 @@ class Minimize():
                             eliminate_duplicates = True)
         elif self._algorithm == "moead":
             print(f"Number of reference directions: {len(self._ref_dir)}")
+            # self.sampling, self.crossover, self.mutation= self._create_mixed_variables(crossover_probs  = [0.8, 0.8, 0.8], mutation_probs = [0.005,0.005,0.005])
             algorithm = MOEAD(ref_dirs = self._ref_dir,
                             sampling = self.sampling,
                             crossover = self.crossover,
@@ -787,7 +766,7 @@ class Minimize():
         """
         algorithm = self.select_algorithm()
         print(f"Running {self._algorithm.upper()} heuristic...")
-        self._problem = ConstraintsAsPenalty(self._problem, penalty=1e6)
+        self._problem = ConstraintsAsPenalty(self._problem, penalty=1e8)
         res = minimize(self._problem,
             algorithm,
             self._termination,
@@ -798,7 +777,7 @@ class Minimize():
         
         return res
 
-    def _create_mixed_variables(self, crossover_probs : list = [0.7, 0.6, 0.6], mutation_probs : list = [0.01, 0.01, 0.01]):
+    def _create_mixed_variables(self, crossover_probs : list = [0.8, 0.8, 0.8], mutation_probs : list = [0.01,0.01,0.01]):
         """
          We create a mixed variable sampling, crossover, and mutation function that uses the
         `bin_random`, `int_random`, and `real_random` sampling functions, the `bin_hux`, `int_sbx`, and
@@ -806,7 +785,7 @@ class Minimize():
         functions
         :return: The sampling, crossover, and mutation methods for the mixed variables.
         """
-        # _num_facilities = len(self._problem._parameters.sorting_facilities) + len(self._problem._parameters.incinerator_facilities) + len(self._problem._parameters.landfill_facilities)
+        # if mutation_probs is None: mutation_probs = [1/self._problem.num_binary_vars, 1/self._problem.num_integer_vars, 1/self._problem.num_continuous_vars]
         _mask_binary = np.array(["bin" for _ in range(self._problem.num_binary_vars)])
         _mask_integer = np.array(["int" for _ in range(self._problem.num_integer_vars)])
         _mask_continuous = np.array(["real" for _ in range(self._problem.num_continuous_vars)])
@@ -818,10 +797,10 @@ class Minimize():
         })
 
         _crossover = MixedVariableCrossover(_masks, {
-            "bin": CustomBinaryPointCrossover(n_points = 1,  prob = crossover_probs[0]),
+            "bin": CustomPointCrossover(n_points = 1,binary=True,  prob = crossover_probs[0]),
             # "bin": get_crossover("bin_k_point",n_points = 1, prob = crossover_probs[0]),
             "int": get_crossover("int_k_point", n_points = 1, prob= crossover_probs[1]),
-            "real": CustomRealPointCrossover(n_points = 1, prob = crossover_probs[2])
+            "real": CustomPointCrossover(n_points = 1,binary=False, prob = crossover_probs[2])
         })
 
         _mutation = MixedVariableMutation(_masks, {
