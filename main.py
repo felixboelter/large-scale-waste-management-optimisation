@@ -1,20 +1,20 @@
-from parameters import Parameters
-from generate_graph import Graph
-from solve_baseline import Model_Baseline, Multiobjective_model
-from parameters import Parameters
-from heuristic import Vectorized_heuristic, Minimize
+import os
+import sys
+from src.parameters import Parameters
+from src.solve_baseline import Model_Baseline, Multiobjective_model
+from src.generate_graph import Graph
+from src.heuristic import Vectorized_heuristic, Minimize
+from src.plotter import Plotter
+
 from pymoo.util.termination.f_tol import MultiObjectiveSpaceToleranceTermination
 from pymoo.factory import get_reference_directions
 from pymoo.indicators.hv import Hypervolume
 import numpy as np
 from IPython.display import display
 import networkx as nx
-from plotter import Plotter
 from plotly.subplots import make_subplots
-import sys
 import pandas as pd
 from itertools import combinations
-import os
 import pickle
 import numpy as np
 import pickle
