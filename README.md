@@ -13,7 +13,7 @@ Clone the repository and install the requirements file via conda.
 ```
 $ git clone https://github.com/felixboelter/large-scale-waste-management-optimisation
 $ cd large-scale-waste-management-optimisation
-$ `conda create --name <env> --file requirements.txt`
+$ conda create --name <env> --file requirements.txt
 ```
 
 # **Usage**
